@@ -108,6 +108,8 @@ export const useContentStore = create<ContentState>((set, get) => ({
       
       if (error) throw error;
       
+      console.log("Fetched chapters:", chapters); // Debugging log
+      
       // Transform the data to match our types
       const formattedChapters: Chapter[] = chapters.map(chapter => ({
         id: chapter.id,
@@ -127,7 +129,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
             stem: question.stem,
             lastUpdatedAt: question.last_updated_at,
             lastUpdatedBy: question.last_updated_by,
-            options: question.options.map(option => ({
+            options: (question.options || []).map(option => ({
               id: option.id,
               questionId: question.id,
               text: option.text,
@@ -832,7 +834,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
         stem: q.stem,
         lastUpdatedAt: q.last_updated_at,
         lastUpdatedBy: q.last_updated_by,
-        options: q.options.map(opt => ({
+        options: (q.options || []).map(opt => ({
           id: opt.id,
           questionId: q.id,
           text: opt.text,
@@ -933,7 +935,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
         stem: q.stem,
         lastUpdatedAt: q.last_updated_at,
         lastUpdatedBy: q.last_updated_by,
-        options: q.options.map(opt => ({
+        options: (q.options || []).map(opt => ({
           id: opt.id,
           questionId: q.id,
           text: opt.text,

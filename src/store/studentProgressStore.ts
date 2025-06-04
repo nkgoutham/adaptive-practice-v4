@@ -80,7 +80,7 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
         chapterId: session.chapter_id,
         startedAt: session.started_at,
         finishedAt: session.finished_at || undefined,
-        attempts: session.attempts.map(attempt => ({
+        attempts: (session.attempts || []).map(attempt => ({
           id: attempt.id,
           sessionId: session.id,
           questionId: attempt.question_id,
@@ -369,7 +369,7 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
       }
       
       // Get all attempts across all sessions
-      const attempts = sessions.flatMap(session => session.attempts);
+      const attempts = sessions.flatMap(session => session.attempts || []);
       
       // Get all questions for these attempts
       const questionIds = [...new Set(attempts.map(attempt => attempt.questionId))];
@@ -520,7 +520,7 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
         bloomLevel: q.bloom_level as BloomLevel,
         difficulty: q.difficulty as DifficultyLevel,
         stem: q.stem,
-        options: q.options.map(opt => ({
+        options: (q.options || []).map(opt => ({
           id: opt.id,
           questionId: q.id,
           text: opt.text,

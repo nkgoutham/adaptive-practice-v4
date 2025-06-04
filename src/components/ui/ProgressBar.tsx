@@ -9,7 +9,7 @@ interface ProgressBarProps {
   max: number;
   showValue?: boolean;
   size?: 'sm' | 'md' | 'lg';
-  color?: 'primary' | 'secondary' | 'success' | 'warning' | 'error';
+  color?: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'neutral';
   className?: string;
 }
 
@@ -38,6 +38,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
     success: 'bg-success-500',
     warning: 'bg-warning-500',
     error: 'bg-error-500',
+    neutral: 'bg-neutral-400',
   };
   
   return (

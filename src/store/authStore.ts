@@ -52,11 +52,25 @@ export const useAuthStore = create<AuthState>((set) => ({
             role: profile.role as UserRole,
             avatar: profile.avatar,
           },
-          isAuthenticated: true
+          isAuthenticated: true,
+          error: null
+        });
+      } else {
+        // Explicitly reset authentication state when no session is found
+        set({ 
+          user: null,
+          isAuthenticated: false,
+          error: null
         });
       }
     } catch (error) {
       console.error('Session check error:', error);
+      // Reset authentication state on error
+      set({ 
+        user: null,
+        isAuthenticated: false,
+        error: error instanceof Error ? error.message : 'Session check failed'
+      });
     }
   },
   
@@ -99,12 +113,15 @@ export const useAuthStore = create<AuthState>((set) => ({
           avatar: profile.avatar,
         },
         isAuthenticated: true,
-        isLoading: false
+        isLoading: false,
+        error: null
       });
     } catch (error) {
       set({ 
         error: error instanceof Error ? error.message : 'Login failed', 
-        isLoading: false 
+        isLoading: false,
+        user: null,
+        isAuthenticated: false
       });
       throw error;
     }
@@ -115,7 +132,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     
     set({ 
       user: null, 
-      isAuthenticated: false 
+      isAuthenticated: false,
+      error: null
     });
   }
 }));

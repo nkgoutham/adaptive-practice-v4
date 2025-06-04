@@ -1,5 +1,6 @@
 /**
  * Question Card component for student practice
+ * Fixed the issue where question.options might not be an array, causing TypeError
  */
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +19,8 @@ interface QuestionCardProps {
 
 // Fisher-Yates shuffle algorithm for randomizing options
 const shuffleArray = <T,>(array: T[]): T[] => {
+  if (!Array.isArray(array)) return [];
+  
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -40,7 +43,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   
   // Shuffle options when the question changes
   useEffect(() => {
-    setShuffledOptions(shuffleArray(question.options));
+    // Ensure question.options is an array before shuffling
+    const options = Array.isArray(question?.options) ? question.options : [];
+    setShuffledOptions(shuffleArray(options));
+    
     setSelectedOption(null);
     setShowTeachingBuddy(false);
     setShowExplanation(false);
@@ -188,10 +194,6 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             <Button 
               variant={selectedOption?.isCorrect ? 'success' : 'primary'}
               fullWidth
-              onClick={() => {
-                // In a real app, this would advance to the next question
-                window.location.reload();
-              }}
             >
               {selectedOption?.isCorrect 
                 ? 'Great job! Continue to next question' 
