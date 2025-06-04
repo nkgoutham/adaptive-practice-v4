@@ -4,10 +4,14 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, BookOpen, Sparkles, AlertCircle, Check, Loader } from 'lucide-react';
+import { ChevronDown, ChevronUp, BookOpen, Sparkles, AlertCircle, Check, Loader, Edit, Trash2 } from 'lucide-react';
 import { Layout } from '../../components/Layout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { QuestionReviewList } from '../../components/teacher/QuestionReviewList';
+import { QuestionEditModal } from '../../components/teacher/QuestionEditModal';
+import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { Question } from '../../types';
 import { useContentStore } from '../../store/contentStore';
 import { useAuthStore } from '../../store/authStore';
 
@@ -19,6 +23,7 @@ interface ConceptWithDescription {
   isExpanded: boolean;
   isGenerating: boolean;
   isGenerated: boolean;
+  isPublished: boolean;
   hasError: boolean;
 }
 
@@ -29,14 +34,34 @@ export const TeacherGeneratePage: React.FC = () => {
     getChapterById, 
     generateQuestionsForChapter, 
     generateQuestionsForConcept,
-    isLoading 
+    publishChapter,
+    publishConcept,
+    deleteQuestion,
+    isLoading,
+    fetchChapters
   } = useContentStore();
   const navigate = useNavigate();
   
   const [error, setError] = useState<string | null>(null);
   const [conceptsWithMeta, setConceptsWithMeta] = useState<ConceptWithDescription[]>([]);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
-  const [publishReady, setPublishReady] = useState(false);
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
+  
+  // Ensure we have the latest data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        await fetchChapters();
+      } catch (err) {
+        console.error("Error fetching chapters:", err);
+      }
+    };
+    
+    loadData();
+  }, [fetchChapters]);
   
   useEffect(() => {
     if (!chapterId || !user) return;
@@ -62,15 +87,12 @@ export const TeacherGeneratePage: React.FC = () => {
           isExpanded: false,
           isGenerating: false,
           isGenerated: concept.questions.length > 0,
+          isPublished: concept.isPublished,
           hasError: false
         };
       });
       
       setConceptsWithMeta(conceptsWithDescriptions);
-      
-      // Check if all concepts have questions
-      const allGenerated = chapter.concepts.every(c => c.questions.length > 0);
-      setPublishReady(allGenerated && chapter.concepts.length > 0);
     }
   }, [chapterId, user, navigate, getChapterById]);
   
@@ -101,8 +123,6 @@ export const TeacherGeneratePage: React.FC = () => {
           hasError: false
         }))
       );
-      
-      setPublishReady(true);
     } catch (err) {
       setError('Failed to generate questions. Please try again.');
       
@@ -142,11 +162,6 @@ export const TeacherGeneratePage: React.FC = () => {
             : concept
         )
       );
-      
-      // Check if all concepts have questions now
-      const chapter = getChapterById(chapterId!);
-      const allGenerated = chapter?.concepts.every(c => c.questions.length > 0) || false;
-      setPublishReady(allGenerated);
     } catch (err) {
       // Update the specific concept's error state
       setConceptsWithMeta(prevConcepts => 
@@ -169,10 +184,84 @@ export const TeacherGeneratePage: React.FC = () => {
     );
   };
   
-  const handlePublish = () => {
-    // In a real app, would make an API call to publish
-    // For demo, just navigate to analytics
-    navigate('/teacher/analytics');
+  const handleReviewConcept = (conceptId: string) => {
+    setSelectedConceptId(conceptId);
+    setShowReviewModal(true);
+  };
+  
+  const handlePublishChapter = async () => {
+    if (!chapterId) return;
+    
+    try {
+      setError(null);
+      await publishChapter(chapterId);
+      
+      // Update local state
+      setConceptsWithMeta(prevConcepts =>
+        prevConcepts.map(concept => ({
+          ...concept,
+          isPublished: true
+        }))
+      );
+      
+      // Navigate to analytics
+      navigate('/teacher/analytics');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish chapter');
+    }
+  };
+  
+  const handlePublishConcept = async () => {
+    if (!selectedConceptId) return;
+    
+    try {
+      setError(null);
+      await publishConcept(selectedConceptId);
+      
+      // Update local state
+      setConceptsWithMeta(prevConcepts =>
+        prevConcepts.map(concept => 
+          concept.id === selectedConceptId
+            ? { ...concept, isPublished: true }
+            : concept
+        )
+      );
+      
+      setShowReviewModal(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish concept');
+    }
+  };
+  
+  const handleQuestionDeleted = (questionId: string) => {
+    const chapter = getChapterById(chapterId!);
+    if (!chapter) return;
+    
+    // Find the concept this question belongs to
+    let conceptId: string | null = null;
+    for (const concept of chapter.concepts) {
+      if (concept.questions.some(q => q.id === questionId)) {
+        conceptId = concept.id;
+        break;
+      }
+    }
+    
+    if (conceptId) {
+      // Check if the concept still has questions
+      const conceptQuestions = chapter.concepts
+        .find(c => c.id === conceptId)?.questions || [];
+      
+      if (conceptQuestions.length <= 1) {
+        // If this was the last question, update concept state
+        setConceptsWithMeta(prevConcepts =>
+          prevConcepts.map(concept => 
+            concept.id === conceptId
+              ? { ...concept, isGenerated: false }
+              : concept
+          )
+        );
+      }
+    }
   };
   
   if (!user || user.role !== 'teacher') {
@@ -187,6 +276,17 @@ export const TeacherGeneratePage: React.FC = () => {
       </Layout>
     );
   }
+  
+  // Get selected concept data for review modal
+  const selectedConcept = selectedConceptId 
+    ? chapter.concepts.find(c => c.id === selectedConceptId)
+    : null;
+  
+  const selectedConceptQuestions = selectedConcept?.questions || [];
+  
+  const allQuestionsGenerated = chapter.concepts.every(
+    concept => concept.questions.length > 0
+  );
   
   return (
     <Layout>
@@ -225,15 +325,27 @@ export const TeacherGeneratePage: React.FC = () => {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-neutral-800">Extracted Concepts</h2>
               
-              <Button
-                variant="primary"
-                isLoading={isGeneratingAll}
-                onClick={handleGenerateAllQuestions}
-                icon={<Sparkles size={16} />}
-                disabled={isGeneratingAll || isLoading}
-              >
-                Generate All Questions
-              </Button>
+              <div className="flex space-x-2">
+                <Button
+                  variant="primary"
+                  isLoading={isGeneratingAll}
+                  onClick={handleGenerateAllQuestions}
+                  icon={<Sparkles size={16} />}
+                  disabled={isGeneratingAll || isLoading || allQuestionsGenerated}
+                >
+                  Generate All Questions
+                </Button>
+                
+                {allQuestionsGenerated && !chapter.isPublished && (
+                  <Button
+                    variant="success"
+                    onClick={handlePublishChapter}
+                    icon={<Check size={16} />}
+                  >
+                    Publish Chapter
+                  </Button>
+                )}
+              </div>
             </div>
             
             <div className="space-y-4">
@@ -245,10 +357,16 @@ export const TeacherGeneratePage: React.FC = () => {
                 return (
                   <div 
                     key={concept.id}
-                    className="border border-neutral-200 rounded-lg overflow-hidden"
+                    className={`border rounded-lg overflow-hidden ${
+                      concept.isPublished 
+                        ? 'border-success-300 bg-success-50'
+                        : 'border-neutral-200'
+                    }`}
                   >
                     <div 
-                      className="p-4 bg-white cursor-pointer hover:bg-neutral-50 flex justify-between items-start"
+                      className={`p-4 cursor-pointer hover:bg-neutral-50 flex justify-between items-start ${
+                        concept.isPublished ? 'bg-success-50' : 'bg-white'
+                      }`}
                       onClick={() => toggleConceptExpansion(concept.id)}
                     >
                       <div className="flex-1">
@@ -256,12 +374,21 @@ export const TeacherGeneratePage: React.FC = () => {
                           <h3 className="font-semibold text-neutral-800 mr-2">
                             {concept.name}
                           </h3>
-                          {concept.isGenerated && (
+                          
+                          {concept.isPublished && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-success-100 text-success-800">
+                              <Check size={12} className="mr-1" />
+                              Published
+                            </span>
+                          )}
+                          
+                          {concept.isGenerated && !concept.isPublished && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
                               <Check size={12} className="mr-1" />
                               Questions Generated
                             </span>
                           )}
+                          
                           {concept.hasError && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-error-100 text-error-800">
                               <AlertCircle size={12} className="mr-1" />
@@ -277,6 +404,12 @@ export const TeacherGeneratePage: React.FC = () => {
                         <div className="flex items-center text-xs text-neutral-500">
                           <BookOpen size={12} className="mr-1" />
                           <span>{concept.pageRange}</span>
+                          
+                          {concept.isGenerated && (
+                            <span className="ml-3">
+                              {conceptQuestions.length} questions
+                            </span>
+                          )}
                         </div>
                       </div>
                       
@@ -301,6 +434,36 @@ export const TeacherGeneratePage: React.FC = () => {
                             <Loader size={16} className="animate-spin mr-1" />
                             <span className="text-sm">Generating...</span>
                           </div>
+                        )}
+                        
+                        {concept.isGenerated && !concept.isPublished && (
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleReviewConcept(concept.id);
+                            }}
+                            icon={<Check size={14} />}
+                            className="mr-3"
+                          >
+                            Review & Publish
+                          </Button>
+                        )}
+                        
+                        {concept.isPublished && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleReviewConcept(concept.id);
+                            }}
+                            icon={<Edit size={14} />}
+                            className="mr-3"
+                          >
+                            View Questions
+                          </Button>
                         )}
                         
                         {concept.isExpanded ? (
@@ -329,6 +492,23 @@ export const TeacherGeneratePage: React.FC = () => {
                                       {question.difficulty}
                                     </span>
                                   </div>
+                                  
+                                  {!concept.isPublished && (
+                                    <div className="flex space-x-2">
+                                      <button 
+                                        className="p-1.5 text-neutral-500 hover:text-primary-500 rounded-full hover:bg-primary-50 transition-colors"
+                                        onClick={() => setEditingQuestion(question)}
+                                      >
+                                        <Edit size={16} />
+                                      </button>
+                                      <button 
+                                        className="p-1.5 text-neutral-500 hover:text-error-500 rounded-full hover:bg-error-50 transition-colors"
+                                        onClick={() => setQuestionToDelete(question)}
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                                 
                                 <p className="text-neutral-800 mb-3">{question.stem}</p>
@@ -393,14 +573,15 @@ export const TeacherGeneratePage: React.FC = () => {
               })}
             </div>
             
-            {publishReady && (
+            {allQuestionsGenerated && !chapter.isPublished && (
               <div className="mt-6 pt-4 border-t border-neutral-200">
                 <Button
                   variant="primary"
                   fullWidth
-                  onClick={handlePublish}
+                  onClick={handlePublishChapter}
+                  icon={<Check size={18} />}
                 >
-                  Publish Questions
+                  Publish All Chapter Questions
                 </Button>
               </div>
             )}
@@ -425,52 +606,141 @@ export const TeacherGeneratePage: React.FC = () => {
               </div>
               
               <div>
-                <h3 className="font-semibold text-neutral-700 mb-1">Concepts Identified</h3>
-                <p className="text-sm text-neutral-600">
-                  {chapter.concepts.length} concepts
+                <h3 className="font-semibold text-neutral-700 mb-1">Publishing Status</h3>
+                <p className={`text-sm ${chapter.isPublished ? 'text-success-600' : 'text-neutral-600'}`}>
+                  {chapter.isPublished ? 'Published' : 'Not Published'}
                 </p>
+                
+                {chapter.isPublished && (
+                  <div className="mt-1 bg-success-50 text-success-700 text-xs p-2 rounded">
+                    This chapter is published and available to students.
+                  </div>
+                )}
+                
+                {!chapter.isPublished && allQuestionsGenerated && (
+                  <div className="mt-1 bg-primary-50 text-primary-700 text-xs p-2 rounded">
+                    All questions have been generated. You can now publish this chapter.
+                  </div>
+                )}
               </div>
               
               <div>
-                <h3 className="font-semibold text-neutral-700 mb-1">Question Generation</h3>
-                <p className="text-sm text-neutral-600">
-                  Each concept will have questions generated across all difficulty levels and Bloom's taxonomy levels.
-                </p>
+                <h3 className="font-semibold text-neutral-700 mb-1">Concepts</h3>
+                <ul className="list-disc pl-5 text-sm text-neutral-600">
+                  {chapter.concepts.map(concept => (
+                    <li key={concept.id} className="mb-1">
+                      {concept.name}
+                      {concept.isPublished && (
+                        <span className="ml-2 text-xs text-success-600">
+                          (Published)
+                        </span>
+                      )}
+                      <span className="ml-2 text-xs text-neutral-500">
+                        ({concept.questions.length} questions)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </Card>
           
-          <Card title="Generation Settings" elevation="medium">
+          <Card title="Publishing Information" elevation="medium">
             <div className="space-y-4">
               <div>
-                <h3 className="font-semibold text-neutral-700 mb-1">Bloom's Taxonomy</h3>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div className="p-2 bg-neutral-100 rounded text-xs text-center">Recall</div>
-                  <div className="p-2 bg-neutral-100 rounded text-xs text-center">Conceptual</div>
-                  <div className="p-2 bg-neutral-100 rounded text-xs text-center">Application</div>
-                  <div className="p-2 bg-neutral-100 rounded text-xs text-center">Analysis</div>
-                </div>
+                <h3 className="font-semibold text-neutral-700 mb-1">Publishing Rules</h3>
+                <ul className="list-disc pl-5 text-sm text-neutral-600 space-y-1">
+                  <li>Questions can be published at the concept or chapter level</li>
+                  <li>All questions within a concept are published together</li>
+                  <li>Once published, questions become visible to students</li>
+                  <li>You can edit questions before publishing them</li>
+                </ul>
               </div>
               
-              <div>
-                <h3 className="font-semibold text-neutral-700 mb-1">Difficulty Levels</h3>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  <div className="p-2 bg-success-100 text-success-800 rounded text-xs text-center">Easy</div>
-                  <div className="p-2 bg-warning-100 text-warning-800 rounded text-xs text-center">Medium</div>
-                  <div className="p-2 bg-error-100 text-error-800 rounded text-xs text-center">Hard</div>
-                </div>
-              </div>
-              
-              <div>
-                <h3 className="font-semibold text-neutral-700 mb-1">Questions Per Concept</h3>
-                <p className="text-sm text-neutral-600">
-                  12 questions per concept (one for each combination of Bloom's level and difficulty)
+              <div className="bg-primary-50 p-3 rounded-lg">
+                <h3 className="font-semibold text-primary-700 mb-1">Tip</h3>
+                <p className="text-sm text-primary-600">
+                  Review questions carefully before publishing. While you can edit published questions, 
+                  students may have already seen and practiced with the original versions.
                 </p>
               </div>
             </div>
           </Card>
         </div>
       </div>
+      
+      {/* Question Review Modal for publishing concept */}
+      {showReviewModal && selectedConceptId && selectedConcept && (
+        <div className="fixed inset-0 bg-neutral-900 bg-opacity-50 z-40 flex items-center justify-center overflow-y-auto py-10">
+          <div className="bg-white rounded-xl w-full max-w-4xl mx-4 shadow-strong max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-neutral-200 flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-neutral-800">
+                Review Questions: {selectedConcept.name}
+              </h2>
+              
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowReviewModal(false)}
+              >
+                Close
+              </Button>
+            </div>
+            
+            <div className="p-4 flex-grow overflow-y-auto">
+              <QuestionReviewList
+                questions={selectedConceptQuestions}
+                onPublish={handlePublishConcept}
+                onDelete={handleQuestionDeleted}
+                chapterId={chapterId!}
+                conceptId={selectedConceptId}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Question Edit Modal */}
+      {editingQuestion && (
+        <QuestionEditModal
+          question={editingQuestion}
+          onSave={async (updatedQuestion) => {
+            try {
+              if (!user) return;
+              await useContentStore.getState().updateQuestion(
+                updatedQuestion.id,
+                updatedQuestion,
+                user.id
+              );
+              setEditingQuestion(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to update question');
+            }
+          }}
+          onCancel={() => setEditingQuestion(null)}
+        />
+      )}
+      
+      {/* Confirmation Modal for Question Deletion */}
+      {questionToDelete && (
+        <ConfirmationModal
+          title="Delete Question"
+          message="Are you sure you want to delete this question? This action cannot be undone."
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          confirmVariant="error"
+          onConfirm={async () => {
+            try {
+              await deleteQuestion(questionToDelete.id);
+              handleQuestionDeleted(questionToDelete.id);
+              setQuestionToDelete(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to delete question');
+            }
+          }}
+          onCancel={() => setQuestionToDelete(null)}
+        />
+      )}
     </Layout>
   );
 };

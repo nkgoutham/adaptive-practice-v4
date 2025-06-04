@@ -21,6 +21,7 @@ export interface Chapter {
   subject: string;
   concepts: Concept[];
   createdAt: string;
+  isPublished: boolean;
 }
 
 export interface Concept {
@@ -28,6 +29,7 @@ export interface Concept {
   chapterId: string;
   name: string;
   questions: Question[];
+  isPublished: boolean;
 }
 
 export type BloomLevel = 'Recall' | 'Conceptual' | 'Application' | 'Analysis';
@@ -40,6 +42,8 @@ export interface Question {
   difficulty: DifficultyLevel;
   stem: string;
   options: QuestionOption[];
+  lastUpdatedBy?: string;
+  lastUpdatedAt?: string;
 }
 
 export interface QuestionOption {
@@ -117,4 +121,14 @@ export interface ClassAnalytics {
     conceptName: string;
     reason: string;
   }[];
+}
+
+// Question management types
+export interface EditHistoryEntry {
+  questionId: string;
+  userId: string;
+  userName: string;
+  timestamp: string;
+  previousValue: string;
+  newValue: string;
 }

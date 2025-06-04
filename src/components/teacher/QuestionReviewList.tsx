@@ -2,25 +2,41 @@
  * Question Review List component for teachers
  */
 import React, { useState } from 'react';
-import { Filter, CheckCircle } from 'lucide-react';
+import { Filter, CheckCircle, Edit, Trash2, AlertTriangle } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Question, BloomLevel, DifficultyLevel } from '../../types';
+import { QuestionEditModal } from './QuestionEditModal';
+import { ConfirmationModal } from '../ui/ConfirmationModal';
+import { useContentStore } from '../../store/contentStore';
+import { useAuthStore } from '../../store/authStore';
 
 interface QuestionReviewListProps {
   questions: Question[];
   onPublish: () => void;
+  onDelete: (questionId: string) => void;
+  chapterId: string;
+  conceptId?: string;
   className?: string;
 }
 
 export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
   questions,
   onPublish,
+  onDelete,
+  chapterId,
+  conceptId,
   className = '',
 }) => {
   const [bloomFilter, setBloomFilter] = useState<BloomLevel | 'All'>('All');
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyLevel | 'All'>('All');
   const [published, setPublished] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  const { updateQuestion, deleteQuestion } = useContentStore();
+  const { user } = useAuthStore();
   
   // Filter questions based on selected filters
   const filteredQuestions = questions.filter(question => 
@@ -28,9 +44,42 @@ export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
     (difficultyFilter === 'All' || question.difficulty === difficultyFilter)
   );
   
-  const handlePublish = () => {
-    onPublish();
-    setPublished(true);
+  const handlePublish = async () => {
+    try {
+      await onPublish();
+      setPublished(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to publish questions');
+    }
+  };
+  
+  const handleUpdateQuestion = async (updatedQuestion: Question) => {
+    if (!user) return;
+    
+    try {
+      setError(null);
+      await updateQuestion(
+        updatedQuestion.id,
+        updatedQuestion,
+        user.id
+      );
+      setEditingQuestion(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update question');
+    }
+  };
+  
+  const handleDeleteQuestion = async () => {
+    if (!questionToDelete) return;
+    
+    try {
+      setError(null);
+      await deleteQuestion(questionToDelete.id);
+      onDelete(questionToDelete.id);
+      setQuestionToDelete(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete question');
+    }
   };
   
   return (
@@ -39,6 +88,13 @@ export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
       title="Review Generated Questions"
       subtitle={`${questions.length} questions generated`}
     >
+      {error && (
+        <div className="mb-4 p-3 bg-error-50 border border-error-200 rounded-lg flex items-center">
+          <AlertTriangle className="w-5 h-5 text-error-500 mr-2" />
+          <p className="text-sm text-error-700">{error}</p>
+        </div>
+      )}
+      
       {!published ? (
         <>
           <div className="mb-4 flex flex-wrap gap-2">
@@ -87,6 +143,20 @@ export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
                       {question.difficulty}
                     </span>
                   </div>
+                  <div className="flex space-x-2">
+                    <button 
+                      className="p-1.5 text-neutral-500 hover:text-primary-500 rounded-full hover:bg-primary-50 transition-colors"
+                      onClick={() => setEditingQuestion(question)}
+                    >
+                      <Edit size={16} />
+                    </button>
+                    <button 
+                      className="p-1.5 text-neutral-500 hover:text-error-500 rounded-full hover:bg-error-50 transition-colors"
+                      onClick={() => setQuestionToDelete(question)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
                 
                 <p className="text-neutral-800 mb-3">{question.stem}</p>
@@ -133,7 +203,7 @@ export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
             fullWidth
             onClick={handlePublish}
           >
-            Publish Questions
+            Publish {conceptId ? 'Concept' : 'Chapter'} Questions
           </Button>
         </>
       ) : (
@@ -150,13 +220,34 @@ export const QuestionReviewList: React.FC<QuestionReviewListProps> = ({
           <Button
             variant="outline"
             onClick={() => {
-              // In a real app, this would navigate to analytics
               window.location.href = '/teacher/analytics';
             }}
           >
             View Analytics
           </Button>
         </div>
+      )}
+      
+      {/* Question Edit Modal */}
+      {editingQuestion && (
+        <QuestionEditModal
+          question={editingQuestion}
+          onSave={handleUpdateQuestion}
+          onCancel={() => setEditingQuestion(null)}
+        />
+      )}
+      
+      {/* Confirmation Modal for Question Deletion */}
+      {questionToDelete && (
+        <ConfirmationModal
+          title="Delete Question"
+          message="Are you sure you want to delete this question? This action cannot be undone."
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          confirmVariant="error"
+          onConfirm={handleDeleteQuestion}
+          onCancel={() => setQuestionToDelete(null)}
+        />
       )}
     </Card>
   );

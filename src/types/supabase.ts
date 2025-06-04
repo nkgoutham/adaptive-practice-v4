@@ -56,6 +56,9 @@ export interface Database {
           created_at: string
           updated_at: string
           is_published: boolean
+          content: string | null
+          processing_status: string | null
+          processing_error: string | null
         }
         Insert: {
           id?: string
@@ -66,6 +69,9 @@ export interface Database {
           created_at?: string
           updated_at?: string
           is_published?: boolean
+          content?: string | null
+          processing_status?: string | null
+          processing_error?: string | null
         }
         Update: {
           id?: string
@@ -76,6 +82,9 @@ export interface Database {
           created_at?: string
           updated_at?: string
           is_published?: boolean
+          content?: string | null
+          processing_status?: string | null
+          processing_error?: string | null
         }
         Relationships: [
           {
@@ -92,18 +101,21 @@ export interface Database {
           chapter_id: string
           name: string
           created_at: string
+          is_published: boolean
         }
         Insert: {
           id?: string
           chapter_id: string
           name: string
           created_at?: string
+          is_published?: boolean
         }
         Update: {
           id?: string
           chapter_id?: string
           name?: string
           created_at?: string
+          is_published?: boolean
         }
         Relationships: [
           {
@@ -140,6 +152,8 @@ export interface Database {
           difficulty: 'Easy' | 'Medium' | 'Hard'
           stem: string
           created_at: string
+          last_updated_by: string | null
+          last_updated_at: string | null
         }
         Insert: {
           id?: string
@@ -148,6 +162,8 @@ export interface Database {
           difficulty: 'Easy' | 'Medium' | 'Hard'
           stem: string
           created_at?: string
+          last_updated_by?: string | null
+          last_updated_at?: string | null
         }
         Update: {
           id?: string
@@ -156,12 +172,20 @@ export interface Database {
           difficulty?: 'Easy' | 'Medium' | 'Hard'
           stem?: string
           created_at?: string
+          last_updated_by?: string | null
+          last_updated_at?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "questions_concept_id_fkey"
             columns: ["concept_id"]
             referencedRelation: "concepts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_last_updated_by_fkey"
+            columns: ["last_updated_by"]
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           }
         ]
@@ -285,6 +309,77 @@ export interface Database {
             foreignKeyName: "attempts_selected_option_id_fkey"
             columns: ["selected_option_id"]
             referencedRelation: "options"
+            referencedColumns: ["id"]
+          }
+        ]
+      },
+      pdf_pages: {
+        Row: {
+          id: string
+          chapter_id: string
+          page_number: number
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          chapter_id: string
+          page_number: number
+          content: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          chapter_id?: string
+          page_number?: number
+          content?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pdf_pages_chapter_id_fkey"
+            columns: ["chapter_id"]
+            referencedRelation: "chapters"
+            referencedColumns: ["id"]
+          }
+        ]
+      },
+      question_edit_history: {
+        Row: {
+          id: string
+          question_id: string
+          user_id: string
+          timestamp: string
+          previous_value: Json
+          new_value: Json
+        }
+        Insert: {
+          id?: string
+          question_id: string
+          user_id: string
+          timestamp?: string
+          previous_value: Json
+          new_value: Json
+        }
+        Update: {
+          id?: string
+          question_id?: string
+          user_id?: string
+          timestamp?: string
+          previous_value?: Json
+          new_value?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "question_edit_history_question_id_fkey"
+            columns: ["question_id"]
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "question_edit_history_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           }
         ]

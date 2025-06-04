@@ -9,7 +9,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { useContentStore } from '../../store/contentStore';
 import { useAuthStore } from '../../store/authStore';
-import { BookOpen, ChevronRight, Plus, Upload, Sparkles } from 'lucide-react';
+import { BookOpen, ChevronRight, Plus, Upload, Sparkles, Check, Edit } from 'lucide-react';
 
 export const TeacherChaptersPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -93,16 +93,30 @@ export const TeacherChaptersPage: React.FC = () => {
           {teacherChapters.map(chapter => (
             <Card 
               key={chapter.id}
-              className="hover:shadow-medium transition-shadow duration-200"
+              className={`hover:shadow-medium transition-shadow duration-200 ${
+                chapter.isPublished ? 'border-2 border-success-200' : ''
+              }`}
               elevation="low"
             >
               <div className="flex flex-col h-full">
                 <div className="flex items-start mb-4">
-                  <div className="bg-primary-100 p-3 rounded-lg mr-3">
-                    <BookOpen className="w-5 h-5 text-primary-600" />
+                  <div className={`p-3 rounded-lg mr-3 ${
+                    chapter.isPublished ? 'bg-success-100' : 'bg-primary-100'
+                  }`}>
+                    <BookOpen className={`w-5 h-5 ${
+                      chapter.isPublished ? 'text-success-600' : 'text-primary-600'
+                    }`} />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-neutral-800">{chapter.title}</h3>
+                    <div className="flex items-center">
+                      <h3 className="font-semibold text-neutral-800 mr-2">{chapter.title}</h3>
+                      {chapter.isPublished && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-success-100 text-success-800">
+                          <Check size={10} className="mr-0.5" />
+                          Published
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-neutral-500">
                       Grade {chapter.grade} • {chapter.subject}
                     </p>
@@ -112,7 +126,14 @@ export const TeacherChaptersPage: React.FC = () => {
                 <div className="mt-2 mb-4">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-neutral-600">Concepts:</span>
-                    <span className="font-medium text-neutral-800">{chapter.concepts.length}</span>
+                    <div>
+                      <span className="font-medium text-neutral-800">{chapter.concepts.length}</span>
+                      {chapter.concepts.some(c => c.isPublished) && (
+                        <span className="ml-1 text-xs text-success-600">
+                          ({chapter.concepts.filter(c => c.isPublished).length} published)
+                        </span>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="flex items-center justify-between text-sm mt-1">
@@ -124,43 +145,41 @@ export const TeacherChaptersPage: React.FC = () => {
                   
                   <div className="flex items-center justify-between text-sm mt-1">
                     <span className="text-neutral-600">Status:</span>
-                    <span className={`font-medium ${chapter.concepts.some(c => c.questions.length > 0) ? 'text-success-600' : 'text-warning-600'}`}>
-                      {chapter.concepts.some(c => c.questions.length > 0) ? 'Questions Generated' : 'Concepts Extracted'}
+                    <span className={`font-medium ${
+                      chapter.isPublished 
+                        ? 'text-success-600' 
+                        : chapter.concepts.some(c => c.questions.length > 0) 
+                          ? 'text-primary-600' 
+                          : 'text-warning-600'
+                    }`}>
+                      {chapter.isPublished 
+                        ? 'Published' 
+                        : chapter.concepts.some(c => c.questions.length > 0) 
+                          ? 'Questions Generated' 
+                          : 'Concepts Extracted'}
                     </span>
                   </div>
                 </div>
                 
                 <div className="mt-auto pt-4 border-t border-neutral-200">
-                  {chapter.concepts.length > 0 && chapter.concepts.every(c => c.questions.length > 0) ? (
-                    <Button
-                      variant="outline"
-                      fullWidth
-                      onClick={() => handleViewConcepts(chapter.id)}
-                      className="flex justify-between items-center"
-                    >
-                      <span>View Questions</span>
-                      <ChevronRight size={16} />
-                    </Button>
-                  ) : chapter.concepts.length > 0 ? (
-                    <Button
-                      variant="primary"
-                      fullWidth
-                      onClick={() => handleViewConcepts(chapter.id)}
-                      className="flex justify-between items-center"
-                      icon={<Sparkles size={16} />}
-                    >
-                      <span>Generate Questions</span>
-                      <ChevronRight size={16} />
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      fullWidth
-                      disabled
-                    >
-                      Processing...
-                    </Button>
-                  )}
+                  <Button
+                    variant={chapter.isPublished ? "outline" : "primary"}
+                    fullWidth
+                    onClick={() => handleViewConcepts(chapter.id)}
+                    className="flex justify-between items-center"
+                    icon={chapter.isPublished ? <Edit size={16} /> : (
+                      chapter.concepts.some(c => c.questions.length > 0) ? <Check size={16} /> : <Sparkles size={16} />
+                    )}
+                  >
+                    <span>
+                      {chapter.isPublished 
+                        ? 'View Questions' 
+                        : chapter.concepts.some(c => c.questions.length > 0) 
+                          ? 'Review & Publish' 
+                          : 'Generate Questions'}
+                    </span>
+                    <ChevronRight size={16} />
+                  </Button>
                 </div>
               </div>
             </Card>
