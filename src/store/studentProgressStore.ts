@@ -3,7 +3,7 @@
  * Manages student practice sessions, attempts, and progress data
  */
 import { create } from 'zustand';
-import { StudentSession, Attempt, ConceptMastery, Star, Question } from '../types';
+import { StudentSession, Attempt, ConceptMastery, Star, Question, BloomLevel, DifficultyLevel } from '../types';
 import { supabase } from '../lib/supabase';
 import { useContentStore } from './contentStore';
 
@@ -242,7 +242,7 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
       
       // Get the question to update concept mastery
       const contentStore = useContentStore.getState();
-      const question = await contentStore.getQuestionById(questionId);
+      const question = contentStore.getQuestionById(questionId);
       if (question) {
         get().updateConceptMastery(
           currentSession.studentId,
@@ -489,64 +489,41 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
     
     try {
       // Get all questions for this concept
-      const { data: questionsData, error: questionsError } = await supabase
-        .from('questions')
-        .select(`
-          id,
-          concept_id,
-          bloom_level,
-          difficulty,
-          stem,
-          options (
-            id,
-            text,
-            is_correct,
-            misconception_tag
-          )
-        `)
-        .eq('concept_id', conceptId);
+      const contentStore = useContentStore.getState();
+      const allConceptQuestions = contentStore.getQuestionsByConceptId(conceptId);
       
-      if (questionsError) throw questionsError;
-      
-      if (questionsData.length === 0) {
+      if (!allConceptQuestions || allConceptQuestions.length === 0) {
+        console.log("No questions found for concept:", conceptId);
         set({ isLoading: false });
         return null;
       }
       
-      // Format questions
-      const questions: Question[] = questionsData.map(q => ({
-        id: q.id,
-        conceptId: q.concept_id,
-        bloomLevel: q.bloom_level as BloomLevel,
-        difficulty: q.difficulty as DifficultyLevel,
-        stem: q.stem,
-        options: (q.options || []).map(opt => ({
-          id: opt.id,
-          questionId: q.id,
-          text: opt.text,
-          isCorrect: opt.is_correct,
-          misconceptionTag: opt.misconception_tag || undefined
-        }))
-      }));
+      console.log(`Found ${allConceptQuestions.length} questions for concept`);
       
       // Get current session
       const { currentSession } = get();
       if (!currentSession) {
+        console.log("No active session found");
         set({ isLoading: false });
-        return questions[0]; // Default to first question if no session
+        return allConceptQuestions[0]; // Default to first question if no session
       }
       
       // Get attempted question IDs in this session
       const attemptedQuestionIds = currentSession.attempts
         .map(attempt => attempt.questionId);
       
+      console.log(`Student has attempted ${attemptedQuestionIds.length} questions in this session`);
+      
       // Find questions that haven't been attempted yet
-      const unattemptedQuestions = questions.filter(
+      const unattemptedQuestions = allConceptQuestions.filter(
         question => !attemptedQuestionIds.includes(question.id)
       );
       
+      console.log(`${unattemptedQuestions.length} unattempted questions remain`);
+      
       // If all questions attempted, return null (concept complete)
       if (unattemptedQuestions.length === 0) {
+        console.log("All questions have been attempted");
         set({ isLoading: false });
         return null;
       }
@@ -555,108 +532,108 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
       const masteries = get().getConceptMasteriesByStudentId(studentId);
       const mastery = masteries.find(m => m.conceptId === conceptId);
       
-      // Default to Easy-Recall if no mastery yet
-      if (!mastery || mastery.totalStars === 0) {
-        const easyRecallQuestion = unattemptedQuestions.find(
-          q => q.difficulty === 'Easy' && q.bloomLevel === 'Recall'
-        );
-        
-        set({ isLoading: false });
-        return easyRecallQuestion || unattemptedQuestions[0];
-      }
-      
-      // Get most recent attempt for this concept
+      // Find most recent attempt for this concept to determine next question
       const conceptAttempts = currentSession.attempts.filter(attempt => {
-        const question = questions.find(q => q.id === attempt.questionId);
+        const question = contentStore.getQuestionById(attempt.questionId);
         return question?.conceptId === conceptId;
       });
       
-      const lastAttempt = conceptAttempts[conceptAttempts.length - 1];
+      console.log(`${conceptAttempts.length} attempts for this concept`);
       
-      if (!lastAttempt) {
-        // Start with Easy-Recall
-        const easyRecallQuestion = unattemptedQuestions.find(
-          q => q.difficulty === 'Easy' && q.bloomLevel === 'Recall'
-        );
-        
-        set({ isLoading: false });
-        return easyRecallQuestion || unattemptedQuestions[0];
-      }
+      // Define the progression matrices
+      const bloomOrder: BloomLevel[] = ['Recall', 'Conceptual', 'Application', 'Analysis'];
+      const difficultyOrder: DifficultyLevel[] = ['Easy', 'Medium', 'Hard'];
       
-      const lastQuestion = questions.find(q => q.id === lastAttempt.questionId);
-      if (!lastQuestion) {
-        set({ isLoading: false });
-        return unattemptedQuestions[0];
-      }
+      let nextBloomLevel: BloomLevel;
+      let nextDifficulty: DifficultyLevel;
       
-      // Adaptive logic based on last question and correctness
-      if (lastAttempt.isCorrect) {
-        // Escalate difficulty
-        const bloomOrder: BloomLevel[] = ['Recall', 'Conceptual', 'Application', 'Analysis'];
-        const difficultyOrder: DifficultyLevel[] = ['Easy', 'Medium', 'Hard'];
-        
-        const currentBloomIndex = bloomOrder.indexOf(lastQuestion.bloomLevel);
-        const currentDifficultyIndex = difficultyOrder.indexOf(lastQuestion.difficulty);
-        
-        // Try to find next question with increased bloom level
-        if (currentBloomIndex < bloomOrder.length - 1) {
-          const nextBloom = bloomOrder[currentBloomIndex + 1];
-          const nextQuestion = unattemptedQuestions.find(
-            q => q.bloomLevel === nextBloom && q.difficulty === lastQuestion.difficulty
-          );
-          if (nextQuestion) {
-            set({ isLoading: false });
-            return nextQuestion;
-          }
-        }
-        
-        // If no next bloom level, increase difficulty
-        if (currentDifficultyIndex < difficultyOrder.length - 1) {
-          const nextDifficulty = difficultyOrder[currentDifficultyIndex + 1];
-          const nextQuestion = unattemptedQuestions.find(
-            q => q.difficulty === nextDifficulty && q.bloomLevel === lastQuestion.bloomLevel
-          );
-          if (nextQuestion) {
-            set({ isLoading: false });
-            return nextQuestion;
-          }
-        }
+      // Adaptive logic
+      if (conceptAttempts.length === 0) {
+        // Start with Easy-Recall for new concepts
+        nextBloomLevel = 'Recall';
+        nextDifficulty = 'Easy';
+        console.log("Starting with Easy-Recall for new concept");
       } else {
-        // De-escalate to easier question
-        const bloomOrder: BloomLevel[] = ['Analysis', 'Application', 'Conceptual', 'Recall'];
-        const difficultyOrder: DifficultyLevel[] = ['Hard', 'Medium', 'Easy'];
+        const lastAttempt = conceptAttempts[conceptAttempts.length - 1];
+        const lastQuestion = contentStore.getQuestionById(lastAttempt.questionId);
         
-        const currentBloomIndex = bloomOrder.indexOf(lastQuestion.bloomLevel);
-        const currentDifficultyIndex = difficultyOrder.indexOf(lastQuestion.difficulty);
-        
-        // Try to find easier difficulty
-        if (currentDifficultyIndex < difficultyOrder.length - 1) {
-          const easierDifficulty = difficultyOrder[currentDifficultyIndex + 1];
-          const nextQuestion = unattemptedQuestions.find(
-            q => q.difficulty === easierDifficulty && q.bloomLevel === lastQuestion.bloomLevel
-          );
-          if (nextQuestion) {
-            set({ isLoading: false });
-            return nextQuestion;
-          }
-        }
-        
-        // If no easier difficulty, try easier bloom level
-        if (currentBloomIndex < bloomOrder.length - 1) {
-          const easierBloom = bloomOrder[currentBloomIndex + 1];
-          const nextQuestion = unattemptedQuestions.find(
-            q => q.bloomLevel === easierBloom && q.difficulty === lastQuestion.difficulty
-          );
-          if (nextQuestion) {
-            set({ isLoading: false });
-            return nextQuestion;
+        if (!lastQuestion) {
+          // Default if we can't find the last question
+          nextBloomLevel = 'Recall';
+          nextDifficulty = 'Easy';
+          console.log("Could not find last question, defaulting to Easy-Recall");
+        } else {
+          const currentBloomIndex = bloomOrder.indexOf(lastQuestion.bloomLevel);
+          const currentDifficultyIndex = difficultyOrder.indexOf(lastQuestion.difficulty);
+          
+          if (lastAttempt.isCorrect) {
+            // Correct answer - escalate difficulty following the matrix
+            // First try to increase bloom level at same difficulty
+            if (currentBloomIndex < bloomOrder.length - 1) {
+              nextBloomLevel = bloomOrder[currentBloomIndex + 1];
+              nextDifficulty = lastQuestion.difficulty;
+              console.log(`Escalating bloom level: ${lastQuestion.bloomLevel} -> ${nextBloomLevel}`);
+            } else {
+              // If at highest bloom, increase difficulty and reset bloom
+              if (currentDifficultyIndex < difficultyOrder.length - 1) {
+                nextDifficulty = difficultyOrder[currentDifficultyIndex + 1];
+                nextBloomLevel = 'Recall';
+                console.log(`Escalating difficulty: ${lastQuestion.difficulty} -> ${nextDifficulty}, resetting bloom to Recall`);
+              } else {
+                // At highest difficulty and bloom, stay there
+                nextBloomLevel = lastQuestion.bloomLevel;
+                nextDifficulty = lastQuestion.difficulty;
+                console.log("Already at highest level, maintaining difficulty");
+              }
+            }
+          } else {
+            // Incorrect answer - de-escalate difficulty
+            // First try to decrease difficulty at same bloom level
+            if (currentDifficultyIndex > 0) {
+              nextDifficulty = difficultyOrder[currentDifficultyIndex - 1];
+              nextBloomLevel = lastQuestion.bloomLevel;
+              console.log(`De-escalating difficulty: ${lastQuestion.difficulty} -> ${nextDifficulty}`);
+            } else {
+              // If at lowest difficulty, decrease bloom level
+              if (currentBloomIndex > 0) {
+                nextBloomLevel = bloomOrder[currentBloomIndex - 1];
+                nextDifficulty = 'Easy';
+                console.log(`De-escalating bloom level: ${lastQuestion.bloomLevel} -> ${nextBloomLevel}`);
+              } else {
+                // At lowest difficulty and bloom, stay there
+                nextBloomLevel = 'Recall';
+                nextDifficulty = 'Easy';
+                console.log("Already at lowest level, maintaining Easy-Recall");
+              }
+            }
           }
         }
       }
       
-      // Default: return any unattempted question
+      // Try to find a question matching the next bloom level and difficulty
+      let nextQuestion = unattemptedQuestions.find(q => 
+        q.bloomLevel === nextBloomLevel && q.difficulty === nextDifficulty
+      );
+      
+      // If no exact match, try to find any unattempted question with the same bloom level
+      if (!nextQuestion) {
+        nextQuestion = unattemptedQuestions.find(q => q.bloomLevel === nextBloomLevel);
+      }
+      
+      // If still no match, try to find any unattempted question with the same difficulty
+      if (!nextQuestion) {
+        nextQuestion = unattemptedQuestions.find(q => q.difficulty === nextDifficulty);
+      }
+      
+      // If still no match, just use any unattempted question
+      if (!nextQuestion) {
+        nextQuestion = unattemptedQuestions[0];
+      }
+      
+      console.log(`Selected next question with bloom=${nextQuestion?.bloomLevel}, difficulty=${nextQuestion?.difficulty}`);
+      
       set({ isLoading: false });
-      return unattemptedQuestions[0];
+      return nextQuestion;
     } catch (error) {
       console.error('Error getting next question:', error);
       set({ isLoading: false });
@@ -669,9 +646,6 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
     const mastery = masteries.find(m => m.conceptId === conceptId);
     
     if (!mastery) return false;
-    
-    // Mastery criteria from PRD:
-    // ≥2 correct answers at Medium+ OR ≥1 correct at Hard → concept mastered
     
     // Get all stars for this student and concept
     const studentStars = get().getStarsByStudentId(studentId);
@@ -697,6 +671,8 @@ export const useStudentProgressStore = create<StudentProgressState>((set, get) =
       }
     });
     
+    // Mastery criteria from PRD:
+    // ≥2 correct answers at Medium+ OR ≥1 correct at Hard → concept mastered
     return mediumPlusCorrect >= 2 || hardCorrect >= 1;
   }
 }));
