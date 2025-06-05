@@ -88,6 +88,8 @@ export const useContentStore = create<ContentState>((set, get) => ({
             name,
             created_at,
             is_published,
+            start_page_number,
+            end_page_number,
             questions (
               id,
               bloom_level,
@@ -121,6 +123,8 @@ export const useContentStore = create<ContentState>((set, get) => ({
           chapterId: chapter.id,
           name: concept.name,
           isPublished: concept.is_published,
+          startPageNumber: concept.start_page_number || undefined,
+          endPageNumber: concept.end_page_number || undefined,
           questions: concept.questions.map(question => ({
             id: question.id,
             conceptId: concept.id,

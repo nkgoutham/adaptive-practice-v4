@@ -1,6 +1,7 @@
 /**
  * PDF Uploader component for teachers
  * Handles client-side PDF parsing and page-by-page storage in Supabase
+ * Allows teachers to specify chapter title, grade, and subject
  */
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,15 +9,12 @@ import { motion } from 'framer-motion';
 import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import * as pdfjs from 'pdfjs-dist';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf';
 import { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { supabase } from '../../lib/supabase';
 
-// Import worker as URL - this is the key fix for Vite projects
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
-
-// Set the worker source to the URL
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// Set worker from CDN
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 interface PDFUploaderProps {
   onUpload: (file: File) => Promise<string>;
@@ -37,6 +35,11 @@ export const PDFUploader: React.FC<PDFUploaderProps> = ({
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  
+  // State for chapter details
+  const [chapterTitle, setChapterTitle] = useState<string>('');
+  const [chapterGrade, setChapterGrade] = useState<number>(5);
+  const [chapterSubject, setChapterSubject] = useState<string>('General');
   
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -80,12 +83,23 @@ export const PDFUploader: React.FC<PDFUploaderProps> = ({
       }
       
       setFile(selectedFile);
+      
+      // Set default chapter title from filename (remove extension)
+      const fileName = selectedFile.name.replace('.pdf', '');
+      setChapterTitle(fileName);
+      
       setError(null);
     }
   };
   
   const handleUpload = async () => {
     if (!file) return;
+    
+    // Validate inputs
+    if (!chapterTitle.trim()) {
+      setError('Please enter a chapter title');
+      return;
+    }
     
     setUploading(true);
     setProcessingStage('Parsing PDF...');
@@ -114,9 +128,9 @@ export const PDFUploader: React.FC<PDFUploaderProps> = ({
       const { data: chapter, error: chapterError } = await supabase
         .from('chapters')
         .insert({
-          title: file.name.replace('.pdf', ''),
-          grade: 5, // Default
-          subject: 'General', // Default
+          title: chapterTitle,
+          grade: chapterGrade,
+          subject: chapterSubject,
           teacher_id: teacherId,
           processing_status: 'uploading'
         })
@@ -276,6 +290,61 @@ export const PDFUploader: React.FC<PDFUploaderProps> = ({
                 <p className="text-sm text-neutral-500 mb-4">
                   {(file.size / 1024 / 1024).toFixed(2)} MB
                 </p>
+                
+                {/* Chapter details form */}
+                <div className="w-full max-w-md mb-4">
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-neutral-700 text-left mb-1">
+                      Chapter Title
+                    </label>
+                    <input
+                      type="text"
+                      value={chapterTitle}
+                      onChange={(e) => setChapterTitle(e.target.value)}
+                      className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="Enter chapter title"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-700 text-left mb-1">
+                        Grade
+                      </label>
+                      <select
+                        value={chapterGrade}
+                        onChange={(e) => setChapterGrade(parseInt(e.target.value))}
+                        className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(grade => (
+                          <option key={grade} value={grade}>
+                            Grade {grade}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-neutral-700 text-left mb-1">
+                        Subject
+                      </label>
+                      <select
+                        value={chapterSubject}
+                        onChange={(e) => setChapterSubject(e.target.value)}
+                        className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="Math">Math</option>
+                        <option value="Science">Science</option>
+                        <option value="English">English</option>
+                        <option value="Social Studies">Social Studies</option>
+                        <option value="History">History</option>
+                        <option value="Geography">Geography</option>
+                        <option value="General">General</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                
                 <Button
                   variant="primary"
                   onClick={handleUpload}

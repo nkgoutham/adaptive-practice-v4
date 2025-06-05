@@ -12,12 +12,14 @@ interface QuestionEditModalProps {
   question: Question;
   onSave: (updatedQuestion: Question) => void;
   onCancel: () => void;
+  isSaving?: boolean;
 }
 
 export const QuestionEditModal: React.FC<QuestionEditModalProps> = ({
   question,
   onSave,
   onCancel,
+  isSaving = false,
 }) => {
   const [editedQuestion, setEditedQuestion] = useState<Question>({...question});
   const [error, setError] = useState<string | null>(null);
@@ -138,15 +140,17 @@ export const QuestionEditModal: React.FC<QuestionEditModalProps> = ({
         animate="visible"
         exit="exit"
         onClick={onCancel}
+        style={{ overflowY: 'auto', padding: '2rem 0' }}
       >
         {/* Modal */}
         <motion.div
-          className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 shadow-strong"
+          className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 shadow-strong relative"
           variants={modalVariants}
           initial="hidden"
           animate="visible"
           exit="exit"
           onClick={(e) => e.stopPropagation()}
+          style={{ maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}
         >
           <h3 className="text-xl font-semibold text-neutral-800 mb-4">
             Edit Question
@@ -169,7 +173,7 @@ export const QuestionEditModal: React.FC<QuestionEditModalProps> = ({
                 value={editedQuestion.stem}
                 onChange={handleStemChange}
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                rows={3}
+                rows={4}
               />
             </div>
             
@@ -288,7 +292,7 @@ export const QuestionEditModal: React.FC<QuestionEditModalProps> = ({
             </div>
           </div>
           
-          <div className="flex justify-end space-x-3">
+          <div className="flex justify-end space-x-3 sticky bottom-0 pt-4 bg-white border-t border-neutral-100 mt-6">
             <Button 
               variant="outline"
               onClick={onCancel}
@@ -298,8 +302,10 @@ export const QuestionEditModal: React.FC<QuestionEditModalProps> = ({
             <Button 
               variant="primary"
               onClick={handleSubmit}
+              isLoading={isSaving}
+              disabled={isSaving}
             >
-              Save Changes
+              {isSaving ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </motion.div>

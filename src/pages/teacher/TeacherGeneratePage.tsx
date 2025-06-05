@@ -14,12 +14,14 @@ import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { Question } from '../../types';
 import { useContentStore } from '../../store/contentStore';
 import { useAuthStore } from '../../store/authStore';
+import { QuestionCard } from '../../components/teacher/QuestionCard';
 
 interface ConceptWithDescription {
   id: string;
   name: string;
   description?: string;
-  pageRange?: string;
+  startPageNumber?: number;
+  endPageNumber?: number;
   isExpanded: boolean;
   isGenerating: boolean;
   isGenerated: boolean;
@@ -49,6 +51,7 @@ export const TeacherGeneratePage: React.FC = () => {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
+  const [isSavingQuestion, setIsSavingQuestion] = useState(false);
   
   // Ensure we have the latest data
   useEffect(() => {
@@ -68,22 +71,22 @@ export const TeacherGeneratePage: React.FC = () => {
     
     const chapter = getChapterById(chapterId);
     if (!chapter) {
-      navigate('/teacher/upload');
+      navigate('/teacher/chapters');
       return;
     }
     
-    // Initialize concepts with descriptions
+    // Initialize concepts with descriptions and page ranges
     if (chapter.concepts.length > 0) {
-      const conceptsWithDescriptions = chapter.concepts.map((concept, index) => {
-        // Generate a description and page range for each concept
-        const pageStart = Math.floor(Math.random() * 5) + 1;
-        const pageEnd = pageStart + Math.floor(Math.random() * 5) + 1;
+      const conceptsWithMetadata = chapter.concepts.map((concept) => {
+        // Generate a generic description for each concept
+        const description = `This concept covers key educational principles related to ${concept.name.toLowerCase()}. Students should understand the fundamental aspects and practical applications.`;
         
         return {
           id: concept.id,
           name: concept.name,
-          description: `This concept covers key educational principles related to ${concept.name.toLowerCase()}. Students should understand the fundamental aspects and practical applications.`,
-          pageRange: `Pages ${pageStart}-${pageEnd}`,
+          description: description,
+          startPageNumber: concept.startPageNumber,
+          endPageNumber: concept.endPageNumber,
           isExpanded: false,
           isGenerating: false,
           isGenerated: concept.questions.length > 0,
@@ -92,7 +95,7 @@ export const TeacherGeneratePage: React.FC = () => {
         };
       });
       
-      setConceptsWithMeta(conceptsWithDescriptions);
+      setConceptsWithMeta(conceptsWithMetadata);
     }
   }, [chapterId, user, navigate, getChapterById]);
   
@@ -264,6 +267,50 @@ export const TeacherGeneratePage: React.FC = () => {
     }
   };
   
+  const handleEditQuestion = async (updatedQuestion: Question) => {
+    if (!user) return;
+    
+    setIsSavingQuestion(true);
+    setError(null);
+    
+    try {
+      await useContentStore.getState().updateQuestion(
+        updatedQuestion.id,
+        updatedQuestion,
+        user.id
+      );
+      
+      // Refresh chapters to get updated data
+      await fetchChapters();
+      
+      setEditingQuestion(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update question');
+    } finally {
+      setIsSavingQuestion(false);
+    }
+  };
+  
+  const handleDeleteQuestion = (questionId: string) => {
+    const chapter = getChapterById(chapterId!);
+    if (!chapter) return;
+    
+    // Find the question to delete
+    let questionToDelete: Question | null = null;
+    
+    for (const concept of chapter.concepts) {
+      const question = concept.questions.find(q => q.id === questionId);
+      if (question) {
+        questionToDelete = question;
+        break;
+      }
+    }
+    
+    if (questionToDelete) {
+      setQuestionToDelete(questionToDelete);
+    }
+  };
+  
   if (!user || user.role !== 'teacher') {
     return <div>Access denied</div>;
   }
@@ -354,6 +401,11 @@ export const TeacherGeneratePage: React.FC = () => {
                 const conceptQuestions = chapter.concepts
                   .find(c => c.id === concept.id)?.questions || [];
                 
+                // Format page range display
+                const pageRangeText = concept.startPageNumber && concept.endPageNumber 
+                  ? `Pages ${concept.startPageNumber}-${concept.endPageNumber}`
+                  : "Pages not specified";
+                
                 return (
                   <div 
                     key={concept.id}
@@ -403,7 +455,7 @@ export const TeacherGeneratePage: React.FC = () => {
                         
                         <div className="flex items-center text-xs text-neutral-500">
                           <BookOpen size={12} className="mr-1" />
-                          <span>{concept.pageRange}</span>
+                          <span>{pageRangeText}</span>
                           
                           {concept.isGenerated && (
                             <span className="ml-3">
@@ -479,74 +531,13 @@ export const TeacherGeneratePage: React.FC = () => {
                         {conceptQuestions.length > 0 ? (
                           <div className="space-y-4">
                             {conceptQuestions.map(question => (
-                              <div 
+                              <QuestionCard
                                 key={question.id}
-                                className="p-3 bg-white border border-neutral-200 rounded-lg"
-                              >
-                                <div className="flex items-start justify-between mb-2">
-                                  <div>
-                                    <span className="inline-block px-2 py-0.5 text-xs font-medium bg-primary-100 text-primary-800 rounded mr-2">
-                                      {question.bloomLevel}
-                                    </span>
-                                    <span className="inline-block px-2 py-0.5 text-xs font-medium bg-secondary-100 text-secondary-800 rounded">
-                                      {question.difficulty}
-                                    </span>
-                                  </div>
-                                  
-                                  {!concept.isPublished && (
-                                    <div className="flex space-x-2">
-                                      <button 
-                                        className="p-1.5 text-neutral-500 hover:text-primary-500 rounded-full hover:bg-primary-50 transition-colors"
-                                        onClick={() => setEditingQuestion(question)}
-                                      >
-                                        <Edit size={16} />
-                                      </button>
-                                      <button 
-                                        className="p-1.5 text-neutral-500 hover:text-error-500 rounded-full hover:bg-error-50 transition-colors"
-                                        onClick={() => setQuestionToDelete(question)}
-                                      >
-                                        <Trash2 size={16} />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                <p className="text-neutral-800 mb-3">{question.stem}</p>
-                                
-                                <div className="space-y-2">
-                                  {question.options.map((option, index) => (
-                                    <div 
-                                      key={option.id}
-                                      className={`p-2 rounded-md text-sm ${
-                                        option.isCorrect 
-                                          ? 'bg-success-50 border border-success-200'
-                                          : 'bg-neutral-50 border border-neutral-200'
-                                      }`}
-                                    >
-                                      <div className="flex items-center">
-                                        <div className={`w-5 h-5 rounded-full mr-2 flex items-center justify-center ${
-                                          option.isCorrect 
-                                            ? 'bg-success-500 text-white'
-                                            : 'bg-neutral-300 text-neutral-700'
-                                        }`}>
-                                          <span className="text-xs font-medium">
-                                            {String.fromCharCode(65 + index)}
-                                          </span>
-                                        </div>
-                                        <span className={option.isCorrect ? 'text-success-700' : 'text-neutral-700'}>
-                                          {option.text}
-                                        </span>
-                                      </div>
-                                      
-                                      {option.misconceptionTag && !option.isCorrect && (
-                                        <div className="mt-1 ml-7 text-xs text-neutral-500">
-                                          Misconception: {option.misconceptionTag}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
+                                question={question}
+                                onEdit={() => setEditingQuestion(question)}
+                                onDelete={handleDeleteQuestion}
+                                isPublished={concept.isPublished}
+                              />
                             ))}
                           </div>
                         ) : concept.isGenerating ? (
@@ -638,6 +629,11 @@ export const TeacherGeneratePage: React.FC = () => {
                       <span className="ml-2 text-xs text-neutral-500">
                         ({concept.questions.length} questions)
                       </span>
+                      {concept.startPageNumber && concept.endPageNumber && (
+                        <span className="ml-2 text-xs text-neutral-500">
+                          (Pages {concept.startPageNumber}-{concept.endPageNumber})
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -704,20 +700,9 @@ export const TeacherGeneratePage: React.FC = () => {
       {editingQuestion && (
         <QuestionEditModal
           question={editingQuestion}
-          onSave={async (updatedQuestion) => {
-            try {
-              if (!user) return;
-              await useContentStore.getState().updateQuestion(
-                updatedQuestion.id,
-                updatedQuestion,
-                user.id
-              );
-              setEditingQuestion(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : 'Failed to update question');
-            }
-          }}
+          onSave={handleEditQuestion}
           onCancel={() => setEditingQuestion(null)}
+          isSaving={isSavingQuestion}
         />
       )}
       

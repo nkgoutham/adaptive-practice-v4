@@ -102,6 +102,8 @@ export interface Database {
           name: string
           created_at: string
           is_published: boolean
+          start_page_number: number | null
+          end_page_number: number | null
         }
         Insert: {
           id?: string
@@ -109,6 +111,8 @@ export interface Database {
           name: string
           created_at?: string
           is_published?: boolean
+          start_page_number?: number | null
+          end_page_number?: number | null
         }
         Update: {
           id?: string
@@ -116,6 +120,8 @@ export interface Database {
           name?: string
           created_at?: string
           is_published?: boolean
+          start_page_number?: number | null
+          end_page_number?: number | null
         }
         Relationships: [
           {

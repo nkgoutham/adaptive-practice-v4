@@ -52,23 +52,67 @@ async function getMisconceptionTags() {
   return data || [];
 }
 
-// Fetch chapter content from pdf_pages
-async function getChapterContent(chapterId) {
-  console.log(`Fetching content for chapter: ${chapterId}`);
-  const { data, error } = await supabase
-    .from("pdf_pages")
-    .select("page_number, content")
-    .eq("chapter_id", chapterId)
-    .order("page_number", { ascending: true });
+// Fetch concept-specific content from pdf_pages
+async function getConceptContent(conceptId) {
+  console.log(`Fetching content for concept: ${conceptId}`);
   
-  if (error) {
-    console.error("Error fetching chapter content:", error);
-    throw new Error(`Failed to fetch chapter content: ${error.message}`);
+  // First, get the concept's page range and chapter ID
+  const { data: conceptData, error: conceptError } = await supabase
+    .from("concepts")
+    .select("chapter_id, start_page_number, end_page_number")
+    .eq("id", conceptId)
+    .single();
+  
+  if (conceptError) {
+    console.error("Error fetching concept data:", conceptError);
+    throw new Error(`Failed to fetch concept data: ${conceptError.message}`);
   }
   
-  console.log(`Fetched ${data?.length || 0} pages of content`);
-  // Combine all page content
-  return data ? data.map(page => page.content).join("\n\n") : "";
+  if (!conceptData) {
+    throw new Error("Concept not found");
+  }
+
+  // Handle case where page numbers aren't set
+  const startPage = conceptData.start_page_number || 1;
+  const endPage = conceptData.end_page_number || 100; // A large number to get all pages if not set
+  
+  console.log(`Fetching pages ${startPage} to ${endPage} for chapter: ${conceptData.chapter_id}`);
+  
+  // Fetch only the pages in the concept's range
+  const { data: pdfPages, error: pagesError } = await supabase
+    .from("pdf_pages")
+    .select("page_number, content")
+    .eq("chapter_id", conceptData.chapter_id)
+    .gte("page_number", startPage)
+    .lte("page_number", endPage)
+    .order("page_number", { ascending: true });
+  
+  if (pagesError) {
+    console.error("Error fetching concept pages:", pagesError);
+    throw new Error(`Failed to fetch concept pages: ${pagesError.message}`);
+  }
+  
+  console.log(`Fetched ${pdfPages?.length || 0} pages for concept`);
+  
+  // If no pages found within the range, fall back to fetching all chapter pages
+  if (!pdfPages || pdfPages.length === 0) {
+    console.log("No pages found in specified range. Falling back to full chapter content.");
+    const { data: allPages, error: allPagesError } = await supabase
+      .from("pdf_pages")
+      .select("page_number, content")
+      .eq("chapter_id", conceptData.chapter_id)
+      .order("page_number", { ascending: true });
+      
+    if (allPagesError) {
+      console.error("Error fetching chapter pages:", allPagesError);
+      throw new Error(`Failed to fetch chapter pages: ${allPagesError.message}`);
+    }
+    
+    return allPages ? allPages.map(page => page.content).join("\n\n") : "";
+  }
+  
+  // Combine all content from the pages in the concept's range
+  return pdfPages.map(page => page.content).join("\n\n");
 }
 
 Deno.serve(async (req: Request) => {
@@ -154,9 +198,9 @@ Deno.serve(async (req: Request) => {
     const chapterId = conceptData.chapters.id;
     console.log(`Associated chapter ID: ${chapterId}`);
 
-    // Fetch full chapter content from pdf_pages
-    const chapterContent = await getChapterContent(chapterId);
-    console.log(`Chapter content length: ${chapterContent.length} characters`);
+    // Fetch content specific to this concept
+    const conceptContent = await getConceptContent(conceptId);
+    console.log(`Concept content length: ${conceptContent.length} characters`);
 
     // Get misconception tags
     const misconceptionTags = await getMisconceptionTags();
@@ -165,9 +209,17 @@ Deno.serve(async (req: Request) => {
     // Generate questions for each Bloom level and difficulty level
     const generatedQuestions = [];
     
+    // Create a seed value based on concept name to increase question variety
+    const conceptNameSeed = conceptData.name.length;
+    
     for (const bloomLevel of bloomLevels) {
       for (const difficulty of difficultyLevels) {
-        console.log(`Generating question for: ${bloomLevel} - ${difficulty}`);
+        // Vary the topic slightly for each combination to prevent repetition
+        const bloomIndex = bloomLevels.indexOf(bloomLevel);
+        const difficultyIndex = difficultyLevels.indexOf(difficulty);
+        const combinationIndex = bloomIndex * difficultyLevels.length + difficultyIndex + 1;
+        
+        console.log(`Generating question for: ${bloomLevel} - ${difficulty} (combination ${combinationIndex})`);
         
         // Call OpenAI API to generate questions
         const generationPrompt = `
@@ -177,6 +229,9 @@ Deno.serve(async (req: Request) => {
           Grade: ${conceptData.chapters.grade}
           Subject: ${conceptData.chapters.subject}
           Concept: ${conceptData.name}
+          Bloom Level: ${bloomLevel}
+          Difficulty: ${difficulty}
+          Question Number: ${combinationIndex} of 12
           
           Please create one multiple-choice question with the following specifications:
           
@@ -193,6 +248,37 @@ Deno.serve(async (req: Request) => {
           - Each incorrect option should have one of the exact misconception tags listed above.
           - Do not add spaces or modify the misconception tags in any way.
           - Format your tags exactly as provided with dashes, not spaces.
+          - AVOID REPETITIVE QUESTIONS - make this question different from others
+          - DO NOT create the same question as earlier combinations
+          - Each question should test a different aspect of the concept
+          - Ensure the question is TRULY at the specified Bloom level and difficulty
+          
+          IMPORTANT GUIDELINES FOR ${conceptData.chapters.subject.toUpperCase()} QUESTIONS:
+          - Questions must be grade-appropriate for ${conceptData.chapters.grade}th grade
+          - Ensure mathematical accuracy if creating math questions
+          - Use clear, concise language appropriate for the grade level
+          - Questions must directly relate to the concept content provided
+          - Base questions on specific facts or information from the content, not general knowledge
+          - Questions should assess understanding of important ideas in the content
+          - Include specific examples from the content when appropriate
+          - For math questions, double-check all calculations and ensure answers are correct
+          - Show your reasoning when creating math questions to verify correctness
+          - For science questions, ensure scientific accuracy and appropriate terminology
+          
+          IMPORTANT:
+          - You MUST use ONLY the provided misconception tags, do not invent new ones.
+          - The correct option should have NULL as the misconceptionTag.
+          - Each incorrect option should have one of the exact misconception tags listed above.
+          - Do not add spaces or modify the misconception tags in any way.
+          - Format your tags exactly as provided with dashes, not spaces.
+          
+          REASONING (think step by step before creating the question):
+          1. First, identify the key points about "${conceptData.name}" in the provided content
+          2. Consider what would be an appropriate ${bloomLevel}-level question at ${difficulty} difficulty
+          3. For math questions, work through the problem step-by-step to ensure the correct answer is accurate
+          4. Formulate a clear question stem that directly relates to the content
+          5. Create one correct answer and three plausible but incorrect options
+          6. Assign appropriate misconception tags that reflect WHY each incorrect option might be chosen
           
           Return the question in the following JSON format:
           {
@@ -223,9 +309,9 @@ Deno.serve(async (req: Request) => {
             }
           }
           
-          Here's the full chapter content for reference. Use this to create accurate and relevant questions:
+          Here's the concept content for reference. Use this to create accurate and relevant questions:
           
-          ${chapterContent}
+          ${conceptContent}
         `;
 
         console.log("Sending request to OpenAI API");
@@ -242,14 +328,14 @@ Deno.serve(async (req: Request) => {
             messages: [
               {
                 role: "system",
-                content: "You are an educational content specialist who creates high-quality practice questions.",
+                content: "You are an educational content specialist who creates high-quality practice questions with particular attention to accuracy in math and science.",
               },
               {
                 role: "user",
                 content: generationPrompt,
               },
             ],
-            temperature: 0.3, // Reduced from 0.7 to make output more deterministic
+            temperature: 0.5 + (combinationIndex * 0.05), // Vary temperature slightly to increase diversity
           }),
         });
 

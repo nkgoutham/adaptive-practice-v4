@@ -30,6 +30,8 @@ export interface Concept {
   name: string;
   questions: Question[];
   isPublished: boolean;
+  startPageNumber?: number;
+  endPageNumber?: number;
 }
 
 export type BloomLevel = 'Recall' | 'Conceptual' | 'Application' | 'Analysis';

@@ -22,21 +22,38 @@ console.log(`OPENAI_MODEL: ${OPENAI_MODEL}`);
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Simple fallback function for extracting concepts without AI
-function extractBasicConcepts(text, title) {
+function extractBasicConcepts(text: string, title: string, totalPages: number) {
   console.log("Using fallback extraction method");
   // Extract sentences that might be conceptual
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
   const filteredSentences = sentences.slice(0, Math.min(10, sentences.length));
   
-  return {
-    concepts: [
-      { name: `${title} - Main Concept`, description: "Primary concept from this chapter" },
-      { name: `${title} - Key Idea 1`, description: filteredSentences[0] || "Important information from this chapter" },
-      { name: `${title} - Key Idea 2`, description: filteredSentences[1] || "Another important concept from this chapter" },
-      { name: `${title} - Key Idea 3`, description: filteredSentences[2] || "Additional concept from this chapter" },
-      { name: `${title} - Application`, description: "How to apply concepts from this chapter" }
-    ]
-  };
+  // Divide the page range evenly among concepts
+  const numConcepts = 5; // We'll create 5 basic concepts
+  const pagesPerConcept = Math.max(1, Math.floor(totalPages / numConcepts));
+  
+  const concepts = [];
+  for (let i = 0; i < numConcepts; i++) {
+    const startPage = i * pagesPerConcept + 1;
+    const endPage = (i === numConcepts - 1) ? totalPages : (i + 1) * pagesPerConcept;
+    
+    concepts.push({
+      name: `${title} - ${i === 0 ? 'Main Concept' : `Key Idea ${i}`}`,
+      description: filteredSentences[i] || `Important information from this chapter (part ${i+1})`,
+      startPageNumber: startPage,
+      endPageNumber: endPage
+    });
+  }
+  
+  // Generate some basic misconceptions
+  const misconceptions = [
+    { tag: 'conceptual-misunderstanding', explanation: `Misunderstanding of core concepts in ${title}` },
+    { tag: 'calculation-error', explanation: 'Error in mathematical calculations or procedures' },
+    { tag: 'logical-fallacy', explanation: 'Incorrect application of logical reasoning' },
+    { tag: 'terminological-confusion', explanation: `Confusion about terminology related to ${title}` }
+  ];
+  
+  return { concepts, misconceptions };
 }
 
 Deno.serve(async (req: Request) => {
@@ -140,6 +157,12 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log(`Found ${pdfPages.length} PDF pages for chapter`);
+    const totalPages = pdfPages.length;
+
+    // Create a map of page summaries for context
+    const pageSummaries = pdfPages.map(page => 
+      `Page ${page.page_number}: ${page.content.substring(0, 150)}...`
+    ).join("\n\n");
 
     // Combine content from all pages - using the full chapter content
     const combinedContent = pdfPages.map(page => page.content).join("\n\n");
@@ -151,32 +174,60 @@ Deno.serve(async (req: Request) => {
       : combinedContent;
     console.log(`Content preview: ${contentPreview}`);
 
-    // Extract concepts (with AI if available, otherwise fallback)
-    let conceptsData;
+    // Extract concepts and misconceptions (with AI if available, otherwise fallback)
+    let extractedData;
     
     if (OPENAI_API_KEY) {
       try {
-        console.log("Using OpenAI for concept extraction");
-        // Call OpenAI API
+        console.log("Using OpenAI for concept and misconception extraction");
+        // Call OpenAI API with enhanced prompt to identify page ranges and generate misconceptions
         const extractionPrompt = `
-          You are an educational content specialist. Extract 5-8 key concepts from this chapter:
+          You are an educational content specialist. Extract 5-8 key concepts from this chapter and identify the page range where each concept appears. Also, identify 5-10 common misconceptions students might have about these concepts.
           
           Chapter: ${chapterData.title}
           Grade: ${chapterData.grade}
           Subject: ${chapterData.subject}
+          Total Pages: ${totalPages}
+          
+          Page Summaries:
+          ${pageSummaries}
           
           Chapter content:
           ${combinedContent}
+          
+          For each concept, analyze where it first appears and where discussion of it ends. Assign a reasonable page range based on the content.
+          
+          For misconceptions, consider what students in grades ${Math.max(1, chapterData.grade - 2)} to ${chapterData.grade + 2} might misunderstand about the content. Create tags that are hyphenated (e.g., "fraction-addition-error") and provide a clear explanation of each misconception.
           
           Return ONLY a JSON object with this structure:
           {
             "concepts": [
               {
                 "name": "Concept name",
-                "description": "Brief explanation of the concept"
+                "description": "Brief explanation of the concept",
+                "startPageNumber": 1,
+                "endPageNumber": 3
+              }
+            ],
+            "misconceptions": [
+              {
+                "tag": "hyphenated-misconception-tag",
+                "explanation": "Clear explanation of what the misconception is and why students might have it"
               }
             ]
           }
+          
+          IMPORTANT RULES:
+          1. Page numbers must be between 1 and ${totalPages} inclusive
+          2. Each concept must have startPageNumber and endPageNumber
+          3. Keep page ranges focused and specific - a concept typically spans 2-4 pages
+          4. Page ranges can overlap between concepts
+          5. Ensure page ranges are accurate and reasonable - don't assign the entire chapter to a single concept
+          6. Name concepts clearly and concisely - avoid vague or overly broad names
+          7. Misconception tags must be hyphenated, lowercase, and descriptive
+          8. Each misconception must have a clear, helpful explanation
+          9. Misconceptions should be specific to the chapter content
+          10. Include subject-specific misconceptions relevant to ${chapterData.subject}
         `;
 
         console.log("Sending request to OpenAI API");
@@ -193,7 +244,7 @@ Deno.serve(async (req: Request) => {
             messages: [
               {
                 role: "system",
-                content: "You are an educational content specialist who extracts key concepts from educational materials.",
+                content: "You are an educational content specialist who extracts key concepts from educational materials, identifies their page ranges, and recognizes common misconceptions.",
               },
               {
                 role: "user",
@@ -221,21 +272,21 @@ Deno.serve(async (req: Request) => {
         }
 
         // Parse the response
-        const conceptsText = openAIData.choices[0].message.content;
-        console.log(`Concepts text from OpenAI: ${conceptsText}`);
+        const responseText = openAIData.choices[0].message.content;
+        console.log(`Response text from OpenAI: ${responseText}`);
         
         try {
-          conceptsData = JSON.parse(conceptsText);
-          console.log("Successfully parsed OpenAI response as JSON:", conceptsData);
+          extractedData = JSON.parse(responseText);
+          console.log("Successfully parsed OpenAI response as JSON:", extractedData);
         } catch (jsonError) {
           console.error("Failed to parse OpenAI response as JSON:", jsonError);
           console.log("Attempting to extract JSON from text...");
           
           // Try to extract JSON from text
-          const jsonMatch = conceptsText.match(/\{[\s\S]*\}/);
+          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             try {
-              conceptsData = JSON.parse(jsonMatch[0]);
+              extractedData = JSON.parse(jsonMatch[0]);
               console.log("Successfully extracted and parsed JSON from response");
             } catch (extractError) {
               console.error("Failed to extract JSON from response:", extractError);
@@ -246,24 +297,40 @@ Deno.serve(async (req: Request) => {
             throw new Error("Could not find JSON pattern in response");
           }
         }
+        
+        // Validate page ranges
+        extractedData.concepts = extractedData.concepts.map(concept => {
+          // Ensure page numbers are integers within valid range
+          const startPage = Math.max(1, Math.min(totalPages, Math.floor(Number(concept.startPageNumber)) || 1));
+          const endPage = Math.max(startPage, Math.min(totalPages, Math.floor(Number(concept.endPageNumber)) || startPage));
+          
+          return {
+            ...concept,
+            startPageNumber: startPage,
+            endPageNumber: endPage
+          };
+        });
+        
       } catch (aiError) {
         // Fall back to basic extraction if AI fails
         console.error("OpenAI extraction failed:", aiError);
         console.log("Falling back to basic extraction method");
-        conceptsData = extractBasicConcepts(combinedContent, chapterData.title);
+        extractedData = extractBasicConcepts(combinedContent, chapterData.title, totalPages);
       }
     } else {
       // No API key, use basic extraction
       console.log("No OpenAI API key available, using basic extraction");
-      conceptsData = extractBasicConcepts(combinedContent, chapterData.title);
+      extractedData = extractBasicConcepts(combinedContent, chapterData.title, totalPages);
     }
 
     // Save concepts to database
-    console.log("Preparing concepts for database insertion:", conceptsData.concepts);
+    console.log("Preparing concepts for database insertion:", extractedData.concepts);
     
-    const conceptsToInsert = conceptsData.concepts.map((concept) => ({
+    const conceptsToInsert = extractedData.concepts.map((concept) => ({
       chapter_id: chapterId,
       name: concept.name,
+      start_page_number: concept.startPageNumber,
+      end_page_number: concept.endPageNumber
     }));
 
     console.log("Inserting concepts into database:", conceptsToInsert);
@@ -285,6 +352,39 @@ Deno.serve(async (req: Request) => {
 
     console.log("Successfully inserted concepts:", insertedConcepts);
 
+    // Save misconceptions to database (if available)
+    if (extractedData.misconceptions && Array.isArray(extractedData.misconceptions)) {
+      console.log("Preparing misconceptions for database insertion:", extractedData.misconceptions);
+      
+      // Process each misconception
+      for (const misconception of extractedData.misconceptions) {
+        if (!misconception.tag || !misconception.explanation) {
+          console.warn("Skipping invalid misconception:", misconception);
+          continue;
+        }
+        
+        // Clean the tag to ensure it's properly formatted
+        const cleanTag = misconception.tag.toLowerCase().trim().replace(/\s+/g, '-');
+        
+        // Upsert the misconception (insert if not exists, update if exists)
+        const { error: misconceptionError } = await supabase
+          .from("misconceptions")
+          .upsert({
+            tag: cleanTag,
+            explanation: misconception.explanation
+          });
+          
+        if (misconceptionError) {
+          console.error(`Failed to save misconception "${cleanTag}":`, misconceptionError);
+          // Continue processing other misconceptions even if this one fails
+        } else {
+          console.log(`Successfully inserted/updated misconception: ${cleanTag}`);
+        }
+      }
+    } else {
+      console.log("No misconceptions data available from extraction");
+    }
+
     // Update chapter status
     console.log("Updating chapter status to 'completed'");
     const { error: updateError } = await supabase
@@ -302,6 +402,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         concepts: insertedConcepts,
+        misconceptionsCount: extractedData.misconceptions?.length || 0
       }),
       {
         status: 200,
