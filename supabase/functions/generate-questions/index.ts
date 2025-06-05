@@ -335,7 +335,7 @@ Deno.serve(async (req: Request) => {
                 content: generationPrompt,
               },
             ],
-            temperature: 0.5 + (combinationIndex * 0.05), // Vary temperature slightly to increase diversity
+            temperature: 0.2 + (combinationIndex * 0.05), // Lower base temperature for more factual outputs while maintaining some diversity
           }),
         });
 
