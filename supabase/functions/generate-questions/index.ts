@@ -115,6 +115,30 @@ async function getConceptContent(conceptId) {
   return pdfPages.map(page => page.content).join("\n\n");
 }
 
+// Get previously generated questions to avoid repetition
+async function getPreviouslyGeneratedQuestions(conceptId) {
+  console.log(`Fetching existing questions for concept: ${conceptId}`);
+  
+  const { data: questions, error } = await supabase
+    .from("questions")
+    .select(`
+      id,
+      stem,
+      bloom_level,
+      difficulty,
+      options (text, is_correct)
+    `)
+    .eq("concept_id", conceptId);
+  
+  if (error) {
+    console.error("Error fetching existing questions:", error);
+    throw new Error(`Failed to fetch existing questions: ${error.message}`);
+  }
+  
+  console.log(`Found ${questions?.length || 0} existing questions`);
+  return questions || [];
+}
+
 Deno.serve(async (req: Request) => {
   console.log("Edge Function: generate-questions received a request");
   
@@ -149,7 +173,7 @@ Deno.serve(async (req: Request) => {
       );
     }
     
-    const { conceptId } = requestData;
+    const { conceptId, regenerateContext } = requestData;
     
     if (!conceptId) {
       console.error("Missing conceptId in request");
@@ -163,6 +187,9 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log(`Processing concept with ID: ${conceptId}`);
+    if (regenerateContext) {
+      console.log(`Regeneration context provided: ${regenerateContext}`);
+    }
 
     // Get concept details and its chapter
     console.log("Fetching concept and chapter details from database");
@@ -205,42 +232,67 @@ Deno.serve(async (req: Request) => {
     // Get misconception tags
     const misconceptionTags = await getMisconceptionTags();
     console.log(`Available misconception tags: ${misconceptionTags.map(m => m.tag).join(", ")}`);
+    
+    // Get previously generated questions to avoid repetition
+    const existingQuestions = await getPreviouslyGeneratedQuestions(conceptId);
+    console.log(`Found ${existingQuestions.length} existing questions to avoid repetition`);
+    
+    // Prepare existing questions text for context
+    const existingQuestionsText = existingQuestions.map(q => 
+      `Question: ${q.stem}\nBloom: ${q.bloom_level}\nDifficulty: ${q.difficulty}\nOptions: ${q.options.map(o => o.text).join("; ")}`
+    ).join("\n\n");
 
     // Generate questions for each Bloom level and difficulty level
     const generatedQuestions = [];
+    
+    // Keep track of generated question stems to avoid duplication
+    const generatedStems = new Set();
     
     // Create a seed value based on concept name to increase question variety
     const conceptNameSeed = conceptData.name.length;
     
     for (const bloomLevel of bloomLevels) {
-      for (const difficulty of difficultyLevels) {
+      for (const difficultyLevel of difficultyLevels) {
         // Vary the topic slightly for each combination to prevent repetition
         const bloomIndex = bloomLevels.indexOf(bloomLevel);
-        const difficultyIndex = difficultyLevels.indexOf(difficulty);
+        const difficultyIndex = difficultyLevels.indexOf(difficultyLevel);
         const combinationIndex = bloomIndex * difficultyLevels.length + difficultyIndex + 1;
         
-        console.log(`Generating question for: ${bloomLevel} - ${difficulty} (combination ${combinationIndex})`);
+        console.log(`Generating question for: ${bloomLevel} - ${difficultyLevel} (combination ${combinationIndex})`);
         
         // Call OpenAI API to generate questions
         const generationPrompt = `
-          You are an educational content specialist tasked with creating high-quality practice questions.
+          You are an educational content specialist tasked with creating high-quality, UNIQUE practice questions.
           
           Chapter: ${conceptData.chapters.title}
           Grade: ${conceptData.chapters.grade}
           Subject: ${conceptData.chapters.subject}
           Concept: ${conceptData.name}
           Bloom Level: ${bloomLevel}
-          Difficulty: ${difficulty}
+          Difficulty: ${difficultyLevel}
           Question Number: ${combinationIndex} of 12
+          
+          *** CRITICAL REQUIREMENT: QUESTION UNIQUENESS ***
+          Your primary task is to create a question that is SIGNIFICANTLY DIFFERENT from any others for this concept. 
+          Each question MUST test a different aspect, application, or facet of the concept.
+          It is ABSOLUTELY ESSENTIAL that you avoid creating questions that are merely rephrased versions of the same underlying question.
+          
+          ${regenerateContext ? `\n*** TEACHER INSTRUCTIONS FOR REGENERATION ***\n${regenerateContext}\n` : ''}
           
           Please create one multiple-choice question with the following specifications:
           
           - Bloom's Taxonomy Level: ${bloomLevel}
-          - Difficulty Level: ${difficulty}
+          - Difficulty Level: ${difficultyLevel}
           - Include a question stem
           - 4 answer options (A, B, C, D)
           - Mark the correct answer
           - For incorrect options, assign one of these misconception tags: ${misconceptionTags.map(m => m.tag).join(", ")}
+          
+          IMPORTANT QUESTION TYPE GUIDELINES BY BLOOM'S LEVEL:
+          - Recall: Direct knowledge recall questions testing memory of facts, terms, or principles.
+          - Conceptual: Questions that test understanding of relationships between concepts.
+          - Application: MUST include a brief realistic scenario or context where the student applies knowledge to a new situation.
+          - Analysis: MUST include a complex scenario or data to analyze with multiple elements to consider.
           
           IMPORTANT:
           - You MUST use ONLY the provided misconception tags, do not invent new ones.
@@ -265,20 +317,19 @@ Deno.serve(async (req: Request) => {
           - Show your reasoning when creating math questions to verify correctness
           - For science questions, ensure scientific accuracy and appropriate terminology
           
-          IMPORTANT:
-          - You MUST use ONLY the provided misconception tags, do not invent new ones.
-          - The correct option should have NULL as the misconceptionTag.
-          - Each incorrect option should have one of the exact misconception tags listed above.
-          - Do not add spaces or modify the misconception tags in any way.
-          - Format your tags exactly as provided with dashes, not spaces.
+          EXISTING QUESTIONS TO AVOID DUPLICATING:
+          ${existingQuestionsText}
           
           REASONING (think step by step before creating the question):
           1. First, identify the key points about "${conceptData.name}" in the provided content
-          2. Consider what would be an appropriate ${bloomLevel}-level question at ${difficulty} difficulty
-          3. For math questions, work through the problem step-by-step to ensure the correct answer is accurate
-          4. Formulate a clear question stem that directly relates to the content
-          5. Create one correct answer and three plausible but incorrect options
-          6. Assign appropriate misconception tags that reflect WHY each incorrect option might be chosen
+          2. Consider what would be an appropriate ${bloomLevel}-level question at ${difficultyLevel} difficulty
+          3. Review the existing questions and ensure you're testing a DIFFERENT aspect of the concept
+          4. For Application and Analysis levels, develop a unique context or scenario
+          5. For math questions, work through the problem step-by-step to ensure the correct answer is accurate
+          6. Formulate a clear question stem that directly relates to the content
+          7. Create one correct answer and three plausible but incorrect options
+          8. Assign appropriate misconception tags that reflect WHY each incorrect option might be chosen
+          9. FINAL UNIQUENESS CHECK: Compare your question to the existing ones - if it's too similar, start over with a different aspect
           
           Return the question in the following JSON format:
           {
@@ -328,14 +379,17 @@ Deno.serve(async (req: Request) => {
             messages: [
               {
                 role: "system",
-                content: "You are an educational content specialist who creates high-quality practice questions with particular attention to accuracy in math and science.",
+                content: "You are an educational content specialist who creates high-quality, diverse, and unique practice questions. You prioritize question uniqueness and relevance over quantity. For each concept, you create questions that test different aspects, applications, or facets of the concept.",
               },
               {
                 role: "user",
                 content: generationPrompt,
               },
             ],
-            temperature: 0.2 + (combinationIndex * 0.05), // Lower base temperature for more factual outputs while maintaining some diversity
+            temperature: 0.7, // Balanced creativity
+            top_p: 0.9, // Diverse token sampling
+            frequency_penalty: 0.7, // Reduce repetition of phrases
+            presence_penalty: 0.7, // Encourage introducing new ideas
           }),
         });
 
@@ -391,6 +445,46 @@ Deno.serve(async (req: Request) => {
           console.error("Invalid question data structure:", questionData);
           continue; // Skip if data structure is invalid
         }
+        
+        // Check if this question stem is too similar to existing ones
+        const newStem = questionData.question.stem.toLowerCase().trim();
+        let isDuplicate = false;
+        
+        // Check against already generated questions in this session
+        if (generatedStems.has(newStem)) {
+          console.log("Skipping duplicate question stem (exact match)");
+          isDuplicate = true;
+        }
+        
+        // Check for high similarity with existing questions
+        for (const existingStem of generatedStems) {
+          // Simple similarity check - can be enhanced with more sophisticated methods
+          const similarityScore = calculateSimilarity(newStem, existingStem);
+          if (similarityScore > 0.7) { // 70% similarity threshold
+            console.log(`Skipping similar question (${Math.round(similarityScore * 100)}% similar)`);
+            isDuplicate = true;
+            break;
+          }
+        }
+        
+        // Check against questions from database
+        for (const existingQuestion of existingQuestions) {
+          const existingStem = existingQuestion.stem.toLowerCase().trim();
+          const similarityScore = calculateSimilarity(newStem, existingStem);
+          if (similarityScore > 0.7) {
+            console.log(`Skipping question similar to database question (${Math.round(similarityScore * 100)}% similar)`);
+            isDuplicate = true;
+            break;
+          }
+        }
+        
+        if (isDuplicate) {
+          console.log("Skipping duplicate/similar question");
+          continue; // Skip this question and try another combination
+        }
+        
+        // Add to generated stems set
+        generatedStems.add(newStem);
 
         // Sanitize misconception tags to ensure they match existing tags
         questionData.question.options.forEach((option: any) => {
@@ -417,7 +511,7 @@ Deno.serve(async (req: Request) => {
         console.log("Inserting question into database:", {
           concept_id: conceptId,
           bloom_level: bloomLevel,
-          difficulty: difficulty,
+          difficulty: difficultyLevel,
           stem: questionData.question.stem
         });
 
@@ -426,7 +520,7 @@ Deno.serve(async (req: Request) => {
           .insert({
             concept_id: conceptId,
             bloom_level: bloomLevel,
-            difficulty: difficulty,
+            difficulty: difficultyLevel,
             stem: questionData.question.stem,
           })
           .select()
@@ -494,3 +588,20 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+// Helper function to calculate similarity between two strings
+// This is a simple implementation that could be enhanced
+function calculateSimilarity(str1: string, str2: string): number {
+  // Simple Jaccard similarity using word sets
+  const words1 = new Set(str1.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  const words2 = new Set(str2.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  
+  // Calculate intersection
+  const intersection = new Set([...words1].filter(word => words2.has(word)));
+  
+  // Calculate union
+  const union = new Set([...words1, ...words2]);
+  
+  // Return Jaccard similarity
+  return union.size === 0 ? 0 : intersection.size / union.size;
+}

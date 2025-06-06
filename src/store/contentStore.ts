@@ -39,6 +39,7 @@ interface ContentState {
     userId: string
   ) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
+  deleteQuestionsForConcept: (conceptId: string) => Promise<void>;
   
   // Question Option methods
   updateQuestionOption: (
@@ -56,7 +57,7 @@ interface ContentState {
   // Upload and generation methods
   uploadChapterPDF: (file: File) => Promise<string>;
   generateQuestionsForChapter: (chapterId: string) => Promise<void>;
-  generateQuestionsForConcept: (conceptId: string) => Promise<void>;
+  generateQuestionsForConcept: (conceptId: string, regenerateContext?: string) => Promise<void>;
 }
 
 export const useContentStore = create<ContentState>((set, get) => ({
@@ -606,6 +607,58 @@ export const useContentStore = create<ContentState>((set, get) => ({
     }
   },
   
+  deleteQuestionsForConcept: async (conceptId: string) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      const concept = get().getConceptById(conceptId);
+      if (!concept) throw new Error('Concept not found');
+      
+      console.log(`Deleting all questions for concept: ${conceptId}`);
+      
+      // Delete all questions for this concept from Supabase (cascades to options)
+      const { error } = await supabase
+        .from('questions')
+        .delete()
+        .eq('concept_id', conceptId);
+      
+      if (error) throw error;
+      
+      // Update local state - remove questions from questions array
+      const updatedQuestions = get().questions.filter(q => q.conceptId !== conceptId);
+      
+      // Remove questions from the concept in chapters
+      const updatedChapters = get().chapters.map(chapter => {
+        const updatedConcepts = chapter.concepts.map(concept => {
+          if (concept.id === conceptId) {
+            return {
+              ...concept,
+              questions: []
+            };
+          }
+          return concept;
+        });
+        
+        return { ...chapter, concepts: updatedConcepts };
+      });
+      
+      set({ 
+        questions: updatedQuestions, 
+        chapters: updatedChapters,
+        isLoading: false 
+      });
+      
+      console.log(`Successfully deleted all questions for concept: ${conceptId}`);
+    } catch (error) {
+      console.error('Error deleting questions for concept:', error);
+      set({ 
+        error: error instanceof Error ? error.message : 'Deletion failed', 
+        isLoading: false 
+      });
+      throw error;
+    }
+  },
+  
   // Question Option methods
   updateQuestionOption: async (optionId: string, updatedData: Partial<QuestionOption>) => {
     set({ isLoading: true, error: null });
@@ -875,7 +928,7 @@ export const useContentStore = create<ContentState>((set, get) => ({
     }
   },
   
-  generateQuestionsForConcept: async (conceptId: string) => {
+  generateQuestionsForConcept: async (conceptId: string, regenerateContext?: string) => {
     set({ isLoading: true, error: null });
     
     try {
@@ -896,12 +949,19 @@ export const useContentStore = create<ContentState>((set, get) => ({
         throw new Error('Concept not found');
       }
       
+      // If this is a regeneration request, delete existing questions first
+      if (regenerateContext) {
+        console.log(`Regenerating questions for concept: ${conceptId} with context: ${regenerateContext}`);
+        await get().deleteQuestionsForConcept(conceptId);
+      }
+      
       // Call the Supabase Edge Function to generate questions
       const { data, error } = await supabase
         .functions
         .invoke('generate-questions', {
           body: JSON.stringify({
-            conceptId: conceptId
+            conceptId: conceptId,
+            regenerateContext: regenerateContext
           })
         });
       
