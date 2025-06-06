@@ -4,7 +4,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, BookOpen, Sparkles, AlertCircle, Check, Loader, Edit, Trash2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronDown, ChevronUp, BookOpen, Sparkles, AlertCircle, Check, Loader, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { Layout } from '../../components/Layout';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -52,6 +53,12 @@ export const TeacherGeneratePage: React.FC = () => {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
   const [isSavingQuestion, setIsSavingQuestion] = useState(false);
+  
+  // New state for regeneration feature
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [regenerateInput, setRegenerateInput] = useState('');
+  const [conceptToRegenerateId, setConceptToRegenerateId] = useState<string | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   
   // Ensure we have the latest data
   useEffect(() => {
@@ -311,6 +318,70 @@ export const TeacherGeneratePage: React.FC = () => {
     }
   };
   
+  // New handlers for regeneration feature
+  const handleRegenerateClick = (conceptId: string) => {
+    const concept = conceptsWithMeta.find(c => c.id === conceptId);
+    if (!concept) return;
+    
+    setConceptToRegenerateId(conceptId);
+    setRegenerateInput('');
+    setShowRegenerateModal(true);
+  };
+  
+  const handleConfirmRegenerate = async () => {
+    if (!conceptToRegenerateId) return;
+    
+    setError(null);
+    setIsRegenerating(true);
+    
+    // Update the specific concept's generating state
+    setConceptsWithMeta(prevConcepts => 
+      prevConcepts.map(concept => 
+        concept.id === conceptToRegenerateId 
+          ? { ...concept, isGenerating: true, hasError: false }
+          : concept
+      )
+    );
+    
+    try {
+      // Call the method with regeneration context
+      await generateQuestionsForConcept(conceptToRegenerateId, regenerateInput);
+      
+      // Update the specific concept's generated state
+      setConceptsWithMeta(prevConcepts => 
+        prevConcepts.map(concept => 
+          concept.id === conceptToRegenerateId 
+            ? { ...concept, isGenerating: false, isGenerated: true, hasError: false }
+            : concept
+        )
+      );
+      
+      // Close the modal and reset state
+      setShowRegenerateModal(false);
+      setRegenerateInput('');
+      setConceptToRegenerateId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to regenerate questions');
+      
+      // Update the specific concept's error state
+      setConceptsWithMeta(prevConcepts => 
+        prevConcepts.map(concept => 
+          concept.id === conceptToRegenerateId 
+            ? { ...concept, isGenerating: false, hasError: true }
+            : concept
+        )
+      );
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+  
+  const handleCancelRegenerate = () => {
+    setShowRegenerateModal(false);
+    setRegenerateInput('');
+    setConceptToRegenerateId(null);
+  };
+  
   if (!user || user.role !== 'teacher') {
     return <div>Access denied</div>;
   }
@@ -334,6 +405,11 @@ export const TeacherGeneratePage: React.FC = () => {
   const allQuestionsGenerated = chapter.concepts.every(
     concept => concept.questions.length > 0
   );
+  
+  // Find the concept being regenerated for modal title
+  const conceptToRegenerate = conceptToRegenerateId
+    ? conceptsWithMeta.find(c => c.id === conceptToRegenerateId)
+    : null;
   
   return (
     <Layout>
@@ -466,7 +542,7 @@ export const TeacherGeneratePage: React.FC = () => {
                       </div>
                       
                       <div className="flex items-center ml-4">
-                        {!concept.isGenerating && !concept.isGenerated && (
+                        {!concept.isGenerating && !concept.isGenerated && !isRegenerating && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -478,6 +554,21 @@ export const TeacherGeneratePage: React.FC = () => {
                             className="mr-3"
                           >
                             Generate
+                          </Button>
+                        )}
+                        
+                        {concept.isGenerated && !concept.isGenerating && !concept.isPublished && !isRegenerating && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRegenerateClick(concept.id);
+                            }}
+                            icon={<RefreshCw size={14} />}
+                            className="mr-3"
+                          >
+                            Regenerate
                           </Button>
                         )}
                         
@@ -691,6 +782,70 @@ export const TeacherGeneratePage: React.FC = () => {
                 chapterId={chapterId!}
                 conceptId={selectedConceptId}
               />
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Regenerate Questions Modal */}
+      {showRegenerateModal && conceptToRegenerate && (
+        <div className="fixed inset-0 bg-neutral-900 bg-opacity-50 z-40 flex items-center justify-center overflow-y-auto py-10">
+          <div className="bg-white rounded-xl w-full max-w-2xl mx-4 shadow-strong max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-neutral-200">
+              <h2 className="text-lg font-semibold text-neutral-800">
+                Regenerate Questions for {conceptToRegenerate.name}
+              </h2>
+            </div>
+            
+            <div className="p-4">
+              <div className="mb-4 p-3 bg-warning-50 border border-warning-200 rounded-lg">
+                <div className="flex items-start">
+                  <AlertCircle className="text-warning-500 mt-0.5 mr-2 flex-shrink-0" size={16} />
+                  <div>
+                    <p className="text-sm text-warning-700 font-medium mb-1">
+                      Warning: This will delete all existing questions
+                    </p>
+                    <p className="text-xs text-warning-600">
+                      All current questions for this concept will be permanently deleted and replaced with newly generated questions.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-neutral-700 mb-1">
+                  Custom Instructions (Optional)
+                </label>
+                <textarea
+                  value={regenerateInput}
+                  onChange={(e) => setRegenerateInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  rows={5}
+                  placeholder="Add specific instructions for regeneration, e.g., 'Include more application questions' or 'Focus on problem-solving with real-world examples'"
+                />
+                
+                <div className="mt-1 text-xs text-neutral-500">
+                  These instructions will guide the AI when creating new questions.
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-2">
+                <Button 
+                  variant="outline"
+                  onClick={handleCancelRegenerate}
+                  disabled={isRegenerating}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  variant="primary"
+                  onClick={handleConfirmRegenerate}
+                  isLoading={isRegenerating}
+                  icon={<RefreshCw size={16} />}
+                >
+                  Regenerate Questions
+                </Button>
+              </div>
             </div>
           </div>
         </div>
