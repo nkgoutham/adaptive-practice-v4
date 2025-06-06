@@ -331,8 +331,10 @@ export const TeacherGeneratePage: React.FC = () => {
   const handleConfirmRegenerate = async () => {
     if (!conceptToRegenerateId) return;
     
+    // Close the modal immediately
+    setShowRegenerateModal(false);
+    
     setError(null);
-    setIsRegenerating(true);
     
     // Update the specific concept's generating state
     setConceptsWithMeta(prevConcepts => 
@@ -356,8 +358,7 @@ export const TeacherGeneratePage: React.FC = () => {
         )
       );
       
-      // Close the modal and reset state
-      setShowRegenerateModal(false);
+      // Reset state
       setRegenerateInput('');
       setConceptToRegenerateId(null);
     } catch (err) {
@@ -371,8 +372,6 @@ export const TeacherGeneratePage: React.FC = () => {
             : concept
         )
       );
-    } finally {
-      setIsRegenerating(false);
     }
   };
   
@@ -833,14 +832,12 @@ export const TeacherGeneratePage: React.FC = () => {
                 <Button 
                   variant="outline"
                   onClick={handleCancelRegenerate}
-                  disabled={isRegenerating}
                 >
                   Cancel
                 </Button>
                 <Button 
                   variant="primary"
                   onClick={handleConfirmRegenerate}
-                  isLoading={isRegenerating}
                   icon={<RefreshCw size={16} />}
                 >
                   Regenerate Questions
