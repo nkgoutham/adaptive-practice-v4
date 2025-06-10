@@ -386,7 +386,7 @@ Deno.serve(async (req: Request) => {
                 content: generationPrompt,
               },
             ],
-            temperature: 0.7, // Balanced creativity
+            // temperature: 0.7, // Balanced creativity
             top_p: 0.9, // Diverse token sampling
             frequency_penalty: 0.7, // Reduce repetition of phrases
             presence_penalty: 0.7, // Encourage introducing new ideas
