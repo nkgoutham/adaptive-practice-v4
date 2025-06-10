@@ -251,7 +251,6 @@ Deno.serve(async (req: Request) => {
                 content: extractionPrompt,
               },
             ],
-            temperature: 0.3,
           }),
         });
 
